@@ -1,0 +1,84 @@
+body {
+    background-color: var(--bs-body-bg);
+    display: flex;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.container {
+    padding-bottom: 2rem;
+}
+
+.card {
+    border: none;
+    border-radius: 10px;
+}
+
+.card-header {
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    background: linear-gradient(135deg, #198754, #157347);
+    /* Success Green */
+}
+
+.card-header h3 {
+    margin-bottom: 0;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #198754, #157347);
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.form-control:focus {
+    box-shadow: 0 0 0 0.25rem rgba(25, 135, 84, 0.25);
+    border-color: #198754;
+}
+
+/* Password Toggle & Strength Checker */
+.password-container {
+    position: relative;
+}
+
+.toggle-password {
+    position: absolute;
+    right: 10px;
+    top: 38px;
+    cursor: pointer;
+    color: #6c757d;
+    z-index: 10;
+}
+
+.password-requirements {
+    list-style: none;
+    padding: 0;
+    margin-top: 10px;
+    margin-bottom: 0;
+    font-size: 0.85rem;
+}
+
+.password-requirements li {
+    margin-bottom: 3px;
+    transition: color 0.3s ease;
+}
+
+.password-requirements li.invalid {
+    color: #dc3545;
+}
+
+/* Red */
+.password-requirements li.valid {
+    color: #198754;
+    font-weight: bold;
+}
+
+/* Green */
+.password-requirements li i {
+    margin-right: 5px;
+}

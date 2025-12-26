@@ -1,0 +1,143 @@
+/* Premium Navbar Styling */
+.navbar {
+    transition: all 0.3s ease;
+    padding: 0.8rem 0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.navbar.bg-primary {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%) !important;
+}
+
+/* Glassmorphism for when sticky */
+.navbar.sticky-nav {
+    padding: 0.5rem 0;
+    background: rgba(30, 60, 114, 0.95) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
+.navbar-brand {
+    font-size: 1.4rem;
+    letter-spacing: -0.5px;
+    transition: transform 0.3s ease;
+}
+
+.navbar-brand:hover {
+    transform: scale(1.05);
+}
+
+.nav-link {
+    position: relative;
+    font-weight: 500;
+    margin: 0 8px;
+    color: rgba(255, 255, 255, 0.85);
+    transition: all 0.3s ease;
+}
+
+/* Fix for buttons inside nav */
+.nav-link.btn {
+    margin-top: 5px;
+    margin-bottom: 5px;
+    line-height: 1.5;
+}
+
+.nav-link.btn-light {
+    color: #1e3c72 !important;
+    /* Ensure text is dark on light button */
+}
+
+.nav-link::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 10%;
+    width: 0;
+    height: 2px;
+    background: #f1c40f;
+    transition: width 0.3s ease;
+}
+
+.nav-link:hover {
+    color: #fff !important;
+}
+
+.nav-link:hover::after {
+    width: 80%;
+}
+
+.nav-link.active {
+    color: #f1c40f !important;
+}
+
+.nav-link.active::after {
+    width: 80%;
+}
+
+/* User Profile Styling */
+.dropdown-menu {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    margin-top: 15px !important;
+    padding: 10px;
+    animation: slideIn 0.3s ease forwards;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dropdown-item {
+    border-radius: 8px;
+    padding: 8px 15px;
+    transition: all 0.2s ease;
+}
+
+.dropdown-item:hover {
+    background-color: #f8f9fa;
+    transform: translateX(5px);
+}
+
+/* Mobile Toggler Styling */
+.navbar-toggler {
+    border: none;
+    padding: 0;
+}
+
+.navbar-toggler:focus {
+    box-shadow: none;
+}
+
+.navbar-toggler-icon {
+    width: 24px;
+    height: 24px;
+}
+
+@media (max-width: 991.98px) {
+    .navbar-collapse {
+        background: rgba(30, 60, 114, 0.98);
+        padding: 20px;
+        margin-top: 15px;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .nav-link {
+        padding: 10px 0;
+        margin: 0;
+    }
+
+    .nav-link::after {
+        display: none;
+    }
+}

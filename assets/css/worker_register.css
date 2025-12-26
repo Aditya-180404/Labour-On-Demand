@@ -1,0 +1,35 @@
+body {
+    background-color: var(--bs-body-bg);
+}
+
+.card {
+    border: none;
+    border-radius: 10px;
+}
+
+.card-header {
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    background: linear-gradient(135deg, #ffc107, #fd7e14);
+    color: white !important;
+}
+
+.btn-warning {
+    background: linear-gradient(135deg, #ffc107, #fd7e14);
+    border: none;
+    color: white;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.btn-warning:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    color: white;
+}
+
+.form-control:focus,
+.form-select:focus {
+    box-shadow: 0 0 0 0.25rem rgba(255, 193, 7, 0.25);
+    border-color: #ffc107;
+}
