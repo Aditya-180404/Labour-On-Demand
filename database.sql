@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `pin_code` VARCHAR(6),
     `address_details` TEXT,
     `location` VARCHAR(100),
+    `otp` VARCHAR(6) DEFAULT NULL,
+    `otp_expires_at` DATETIME DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -46,6 +48,8 @@ CREATE TABLE IF NOT EXISTS `workers` (
     `signature_photo` VARCHAR(255) DEFAULT NULL,
     `previous_work_images` TEXT DEFAULT NULL,
     `working_location` VARCHAR(100),
+    `otp` VARCHAR(6) DEFAULT NULL,
+    `otp_expires_at` DATETIME DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`service_category_id`) REFERENCES `categories`(`id`) ON DELETE SET NULL
 );

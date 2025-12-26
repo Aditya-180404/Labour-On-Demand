@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
 
 // Check if ID is provided
 if (!isset($_GET['id'])) {
@@ -110,6 +111,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                 // Refresh booked slots for the message
                 $booked_slots_stmt->execute([$worker_id, $date]);
                 $booked_slots = $booked_slots_stmt->fetchAll();
+
+                // SEND EMAIL TO WORKER
+                // Fetch user name
+                $u_stmt = $pdo->prepare("SELECT name FROM users WHERE id = ?");
+                $u_stmt->execute([$user_id]);
+                $u_name = $u_stmt->fetchColumn(); 
+
+                $subject = "New Booking Request - Labour On Demand";
+                $message = "
+                    <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                        <h2 style='color: #fd7e14;'>New Job Request!</h2>
+                        <p>Hello <strong>{$worker['name']}</strong>,</p>
+                        <p>You have received a new booking request from customer <strong>$u_name</strong>.</p>
+                        <ul>
+                            <li><strong>Date:</strong> $date</li>
+                            <li><strong>Time:</strong> $time</li>
+                            <li><strong>Location:</strong> $address</li>
+                        </ul>
+                        <p>Please login to your dashboard to <strong>Accept</strong> or <strong>Reject</strong> this job.</p>
+                        <a href='http://localhost/laubour/worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
+                        <br><br>
+                        <p>Regards,<br>Team Labour On Demand</p>
+                    </div>";
+                
+                sendEmail($worker['email'], $worker['name'], $subject, $message);
+
+
             } else {
                 $booking_error = "Failed to book worker.";
             }

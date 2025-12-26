@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
 
 // Check if worker is logged in
 if (!isset($_SESSION['worker_id'])) {
@@ -17,13 +18,36 @@ if (isset($_POST['booking_action']) && isset($_POST['booking_id'])) {
     $booking_id = $_POST['booking_id'];
     
     // Verify booking belongs to this worker and is pending
-    $verify_stmt = $pdo->prepare("SELECT id FROM bookings WHERE id = ? AND worker_id = ? AND status = 'pending'");
+    $verify_stmt = $pdo->prepare("SELECT id, user_id, service_date, service_time FROM bookings WHERE id = ? AND worker_id = ? AND status = 'pending'");
     $verify_stmt->execute([$booking_id, $worker_id]);
+    $booking_data = $verify_stmt->fetch();
     
-    if ($verify_stmt->rowCount() > 0) {
+    if ($booking_data) {
         $update_stmt = $pdo->prepare("UPDATE bookings SET status = ? WHERE id = ?");
         if ($update_stmt->execute([$status, $booking_id])) {
             $success_msg = "Booking " . ucfirst($status) . ".";
+
+            // SEND EMAIL TO USER (Acceptance)
+            if ($status === 'accepted') {
+                $u_stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+                $u_stmt->execute([$booking_data['user_id']]);
+                $user = $u_stmt->fetch();
+
+                if ($user) {
+                    $subject = "Booking Accepted! - Labour On Demand";
+                    $message = "
+                        <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                            <h2 style='color: #28a745;'>Booking Confirmed!</h2>
+                            <p>Hello <strong>{$user['name']}</strong>,</p>
+                            <p>Great news! The worker has accepted your booking request.</p>
+                            <p>They will arrive on <strong>" . date('M d, Y', strtotime($booking_data['service_date'])) . "</strong> at <strong>" . date('h:i A', strtotime($booking_data['service_time'])) . "</strong>.</p>
+                            <br>
+                            <p>Thank you for choosing Labour On Demand.</p>
+                        </div>";
+                    sendEmail($user['email'], $user['name'], $subject, $message);
+                }
+            }
+
         } else {
             $error_msg = "Failed to update booking.";
         }
@@ -43,13 +67,40 @@ if (isset($_POST['complete_booking']) && isset($_POST['booking_id']) && isset($_
         $completion_time = date('Y-m-d H:i:s');
         
         // Verify booking belongs to this worker and is active
-        $stmt = $pdo->prepare("SELECT id FROM bookings WHERE id = ? AND worker_id = ? AND status = 'accepted'");
+        $stmt = $pdo->prepare("SELECT id, user_id, service_date FROM bookings WHERE id = ? AND worker_id = ? AND status = 'accepted'");
         $stmt->execute([$booking_id, $worker_id]);
+        $booking_data = $stmt->fetch();
         
-        if ($stmt->rowCount() > 0) {
+        if ($booking_data) {
             $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'completed', amount_paid = ?, completion_time = ? WHERE id = ?");
             if ($update_stmt->execute([$amount_paid, $completion_time, $booking_id])) {
                 $success_msg = "Job marked as completed. Amount received: ₹" . htmlspecialchars($amount_paid);
+
+                // SEND EMAIL TO USER (Bill/Thank You)
+                $u_stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+                $u_stmt->execute([$booking_data['user_id']]);
+                $user = $u_stmt->fetch();
+
+                if ($user) {
+                    $subject = "Job Completed - Billing Details";
+                    $message = "
+                        <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                            <h2 style='color: #0d6efd;'>Thank You!</h2>
+                            <p>Hello <strong>{$user['name']}</strong>,</p>
+                            <p>The job has been marked as completed by the worker.</p>
+                            <div style='background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;'>
+                                <h3>Invoice Summary</h3>
+                                <p><strong>Service Date:</strong> " . date('M d, Y', strtotime($booking_data['service_date'])) . "</p>
+                                <p><strong>Total Amount Paid:</strong> <span style='font-size: 1.2em; color: #198754; font-weight: bold;'>₹{$amount_paid}</span></p>
+                            </div>
+                            <p>We hope you were satisfied with the service. Please login to leave a review!</p>
+                            <a href='http://localhost/laubour/customer/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #0d6efd; text-decoration: none; border-radius: 5px;'>Leave a Review</a>
+                            <br><br>
+                            <p>Regards,<br>Team Labour On Demand</p>
+                        </div>";
+                    sendEmail($user['email'], $user['name'], $subject, $message);
+                }
+
             } else {
                 $error_msg = "Failed to update status.";
             }

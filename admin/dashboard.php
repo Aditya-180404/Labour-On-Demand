@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
 
 // Check Admin Login
 if (!isset($_SESSION['admin_logged_in'])) {
@@ -16,9 +17,44 @@ if (isset($_POST['action']) && isset($_POST['worker_id'])) {
     $worker_id = $_POST['worker_id'];
     $new_status = ($action === 'approve') ? 'approved' : 'rejected';
     
+    // Fetch worker details first for email
+    $stmt = $pdo->prepare("SELECT name, email FROM workers WHERE id = ?");
+    $stmt->execute([$worker_id]);
+    $worker = $stmt->fetch();
+
     $stmt = $pdo->prepare("UPDATE workers SET status = ? WHERE id = ?");
     if ($stmt->execute([$new_status, $worker_id])) {
         $success_msg = "Worker status updated to " . ucfirst($new_status) . ".";
+        
+        // Send Notification Email
+        if ($worker) {
+            $subject = "Account Status Update - Labour On Demand";
+            $message = "";
+            if ($action === 'approve') {
+                $message = "
+                    <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                        <h2 style='color: #28a745;'>Account Approved!</h2>
+                        <p>Hello <strong>{$worker['name']}</strong>,</p>
+                        <p>Congratulations! Your worker profile has been approved by the admin.</p>
+                        <p>You can now login to your account and start accepting bookings.</p>
+                        <a href='http://localhost/laubour/worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
+                        <br><br>
+                        <p>Regards,<br>Team Labour On Demand</p>
+                    </div>";
+            } else {
+                $message = "
+                    <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+                        <h2 style='color: #dc3545;'>Account Status Update</h2>
+                        <p>Hello <strong>{$worker['name']}</strong>,</p>
+                        <p>We regret to inform you that your worker profile application has been rejected.</p>
+                        <p>Please contact support for more information or try registering again with correct details.</p>
+                        <br>
+                        <p>Regards,<br>Team Labour On Demand</p>
+                    </div>";
+            }
+            sendEmail($worker['email'], $worker['name'], $subject, $message);
+        }
+
     } else {
         $error_msg = "Failed to update status.";
     }
@@ -103,9 +139,11 @@ $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC"
 $feedbacks = $feedbacks_stmt->fetchAll();
 
 // Helper function to render feedback rows
-function renderFeedbackTable($feedbacks, $showRole = true) {
+// Helper function to render feedback rows
+function renderFeedbackTable($feedbacks, $showRole = true, $context = 'default') {
     if (count($feedbacks) > 0) {
         foreach ($feedbacks as $fb) {
+            $modalId = "replyModal" . $fb['id'] . "_" . $context;
             ?>
             <tr>
                 <td><small class="text-muted"><?php echo date('M d, Y', strtotime($fb['created_at'])); ?></small></td>
@@ -145,17 +183,47 @@ function renderFeedbackTable($feedbacks, $showRole = true) {
                 </td>
                 <td>
                     <div class="d-flex gap-2">
-                        <a href="mailto:<?php echo $fb['email']; ?>?subject=Re: <?php echo rawurlencode($fb['subject']); ?>&body=Hello <?php echo rawurlencode($fb['name']); ?>,%0D%0A%0D%0A" class="btn btn-primary btn-sm rounded-pill px-3" title="Reply Email">
-                            <i class="fas fa-reply me-1"></i> Reply
-                        </a>
-                        <?php if($fb['status'] == 'pending'): ?>
-                            <form method="POST" style="display:inline;">
-                                <input type="hidden" name="feedback_id" value="<?php echo $fb['id']; ?>">
-                                <input type="hidden" name="handle_feedback" value="mark_replied">
-                                <button type="submit" class="btn btn-outline-success btn-sm rounded-pill px-3" title="Mark as Resolved">
-                                    <i class="fas fa-check me-1"></i> Done
-                                </button>
-                            </form>
+                        <?php if($fb['status'] == 'pending' || $fb['status'] == 'read'): ?>
+                            <button type="button" class="btn btn-primary btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#<?php echo $modalId; ?>">
+                                <i class="fas fa-reply me-1"></i> Reply
+                            </button>
+
+                            <!-- Reply Modal -->
+                            <div class="modal fade" id="<?php echo $modalId; ?>" tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Reply to <?php echo htmlspecialchars($fb['name']); ?></h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <form method="POST">
+                                            <div class="modal-body">
+                                                <input type="hidden" name="feedback_id" value="<?php echo $fb['id']; ?>">
+                                                <input type="hidden" name="reply_email" value="<?php echo htmlspecialchars($fb['email']); ?>">
+                                                <input type="hidden" name="reply_name" value="<?php echo htmlspecialchars($fb['name']); ?>">
+                                                <input type="hidden" name="reply_subject" value="<?php echo htmlspecialchars($fb['subject']); ?>">
+                                                
+                                                <div class="mb-3">
+                                                    <label class="form-label text-muted small">To:</label>
+                                                    <input type="text" class="form-control-plaintext fw-bold" value="<?php echo htmlspecialchars($fb['name']); ?> < <?php echo htmlspecialchars($fb['email']); ?> >" readonly>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">Message:</label>
+                                                    <textarea name="reply_message" class="form-control" rows="5" required placeholder="Type your reply here..."></textarea>
+                                                </div>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                <button type="submit" name="send_feedback_reply" value="1" class="btn btn-primary"><i class="fas fa-paper-plane me-1"></i> Send Reply</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <button class="btn btn-success btn-sm rounded-pill px-3" disabled>
+                                <i class="fas fa-check me-1"></i> Replied
+                            </button>
                         <?php endif; ?>
                     </div>
                 </td>
@@ -167,16 +235,47 @@ function renderFeedbackTable($feedbacks, $showRole = true) {
     }
 }
 
-// Handle Feedback Status Update
-if (isset($_POST['handle_feedback']) && $_POST['handle_feedback'] == 'mark_replied' && isset($_POST['feedback_id'])) {
+// Handle Feedback Reply (Email + Status Update)
+if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
     $fid = $_POST['feedback_id'];
-    $stmt = $pdo->prepare("UPDATE feedbacks SET status = 'replied' WHERE id = ?");
-    if ($stmt->execute([$fid])) {
-        $success_msg = "Feedback marked as replied.";
-        // Refresh data
-        $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
-        $feedbacks = $feedbacks_stmt->fetchAll();
+    $to_email = $_POST['reply_email'];
+    $to_name = $_POST['reply_name'];
+    $original_subject = $_POST['reply_subject'];
+    $reply_message = $_POST['reply_message'];
+
+    $subject = "Re: $original_subject - Labour On Demand";
+    $body = "
+        <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+            <h2 style='color: #0d6efd;'>Response from Support</h2>
+            <p>Hello <strong>$to_name</strong>,</p>
+            <p>Thank you for contacting us regarding '<em>$original_subject</em>'.</p>
+            <div style='background: #f8f9fa; padding: 15px; border-left: 4px solid #0d6efd; margin: 15px 0;'>
+                <strong>Our Reply:</strong><br>
+                " . nl2br(htmlspecialchars($reply_message)) . "
+            </div>
+            <p>If you have further questions, feel free to reply to this email.</p>
+            <br>
+            <p>Regards,<br>Admin Team<br>Labour On Demand</p>
+        </div>";
+    
+    // Send Email
+    $email_result = sendEmail($to_email, $to_name, $subject, $body);
+
+    if ($email_result['status']) {
+        // Update DB
+        $stmt = $pdo->prepare("UPDATE feedbacks SET status = 'replied' WHERE id = ?");
+        if ($stmt->execute([$fid])) {
+            $success_msg = "Reply sent successfully to $to_email.";
+        } else {
+            $error_msg = "Email sent, but failed to update status in database.";
+        }
+    } else {
+        $error_msg = "Failed to send email: " . $email_result['message'];
     }
+
+    // Refresh data
+    $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
+    $feedbacks = $feedbacks_stmt->fetchAll();
 }
 ?>
 <!DOCTYPE html>

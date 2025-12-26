@@ -2,54 +2,108 @@
 session_start();
 require_once '../config/db.php';
 
+
+require_once '../includes/mailer.php';
+
+$otp_sent = false;
+$error = "";
+$success = "";
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $name = trim($_POST['name']);
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
-    $phone = trim($_POST['phone']);
-    $pin_code = trim($_POST['pin_code']);
-    $address_details = trim($_POST['address_details']);
-    $location = trim($_POST['location']);
 
-    if (empty($name) || empty($email) || empty($password) || empty($pin_code) || empty($address_details)) {
-        echo "Please fill all required fields.";
-        exit;
+    // STEP 1: INITIAL REGISTRATION (SEND OTP)
+    if (isset($_POST['register_init'])) {
+        $name = trim($_POST['name']);
+        $email = trim($_POST['email']);
+        $password = $_POST['password'];
+        $phone = trim($_POST['phone']);
+        $pin_code = trim($_POST['pin_code']);
+        $address_details = trim($_POST['address_details']);
+        $location = trim($_POST['location']);
+
+        if (empty($name) || empty($email) || empty($password) || empty($pin_code) || empty($address_details)) {
+            $error = "Please fill all required fields.";
+        } else {
+            // Check password strength
+            if (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/', $password)) {
+                 $error = "Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.";
+            } elseif (!preg_match('/^\d{10}$/', $phone)) {
+                 $error = "Phone number must be exactly 10 digits.";
+            } elseif (!preg_match('/^\d{6}$/', $pin_code)) {
+                 $error = "PIN code must be exactly 6 digits.";
+            } else {
+                 // Check if email exists
+                $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+                $stmt->execute([$email]);
+                 if ($stmt->rowCount() > 0) {
+                     $error = "Email already exists.";
+                 } else {
+                    // Generate OTP
+                    $otp = rand(100000, 999999);
+                    
+                    // Store user data and OTP in session
+                    $_SESSION['temp_user'] = [
+                        'name' => $name,
+                        'email' => $email,
+                        'password' => password_hash($password, PASSWORD_DEFAULT),
+                        'phone' => $phone,
+                        'pin_code' => $pin_code,
+                        'address_details' => $address_details,
+                        'location' => $location
+                    ];
+                    $_SESSION['register_otp'] = $otp;
+                    
+                    // Send OTP via Email
+                    $mail_result = sendOTPEmail($email, $otp, $name);
+                    
+                    if ($mail_result['status']) {
+                        $success = "OTP sent to email: $email. Please check your inbox (and spam folder).";
+                        // Dev fallback if needed: $success .= " (Dev: $otp)"; 
+                         $otp_sent = true;
+                    } else {
+                        // If mail fails, show error
+                        $error = "Error sending email: " . $mail_result['message'];
+                        $otp_sent = false;
+                    }
+                 }
+            }
+        }
     }
 
-    // Check password strength
-    if (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/', $password)) {
-        echo "Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.";
-        exit;
-    } elseif (!preg_match('/^\d{10}$/', $phone)) {
-        echo "Phone number must be exactly 10 digits.";
-        exit;
-    } elseif (!preg_match('/^\d{6}$/', $pin_code)) {
-        echo "PIN code must be exactly 6 digits.";
-        exit;
-    }
+    // STEP 2: VERIFY OTP AND CREATE ACCOUNT
+    elseif (isset($_POST['verify_otp'])) {
+        $entered_otp = trim($_POST['otp']);
+        
+        if (!isset($_SESSION['register_otp']) || !isset($_SESSION['temp_user'])) {
+             $error = "Session expired. Please register again.";
+             $otp_sent = false;
+        } elseif ($entered_otp == $_SESSION['register_otp']) {
+            // OTP Valid -> Insert into DB
+            $user_data = $_SESSION['temp_user'];
+            
+            $sql = "INSERT INTO users (name, email, password, phone, pin_code, address_details, location) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            $stmt = $pdo->prepare($sql);
+            
+             if ($stmt->execute([$user_data['name'], $user_data['email'], $user_data['password'], $user_data['phone'], $user_data['pin_code'], $user_data['address_details'], $user_data['location']])) {
+                 // Auto login
+                $_SESSION['user_id'] = $pdo->lastInsertId();
+                $_SESSION['user_name'] = $user_data['name'];
+                $_SESSION['user_email'] = $user_data['email'];
+                
+                // Clear temp session
+                unset($_SESSION['temp_user']);
+                unset($_SESSION['register_otp']);
 
-    // Check if email exists
-    $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-    $stmt->execute([$email]);
-    if ($stmt->rowCount() > 0) {
-        echo "Email already exists.";
-        exit;
-    }
-
-    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-
-    $sql = "INSERT INTO users (name, email, password, phone, pin_code, address_details, location) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $pdo->prepare($sql);
-    
-    if ($stmt->execute([$name, $email, $hashed_password, $phone, $pin_code, $address_details, $location])) {
-        // Auto login
-        $_SESSION['user_id'] = $pdo->lastInsertId();
-        $_SESSION['user_name'] = $name;
-        $_SESSION['user_email'] = $email;
-        header("Location: ../index.php");
-        exit;
-    } else {
-        echo "Something went wrong. Please try again.";
+                header("Location: ../index.php");
+                exit;
+            } else {
+                 $error = "Something went wrong. Please try again.";
+            }
+        } else {
+             $error = "Invalid OTP. Please try again.";
+             $otp_sent = true;
+             $success = "Please enter the OTP sent to your email.";
+        }
     }
 }
 ?>
@@ -84,34 +138,42 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <h3>Customer Registration</h3>
                     </div>
                     <div class="card-body">
+                         <?php if($error): ?>
+                            <div class="alert alert-danger"><?php echo $error; ?></div>
+                        <?php endif; ?>
+                        <?php if($success): ?>
+                            <div class="alert alert-success"><?php echo $success; ?></div>
+                        <?php endif; ?>
+
+                        <?php if(!$otp_sent): ?>
                         <form action="register.php" method="POST" id="registerForm">
                             <div class="mb-3">
                                 <label for="name" class="form-label">Full Name *</label>
-                                <input type="text" class="form-control" id="name" name="name" required>
+                                <input type="text" class="form-control" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
                             </div>
                             <div class="mb-3">
                                 <label for="email" class="form-label">Email Address *</label>
-                                <input type="email" class="form-control" id="email" name="email" required>
+                                <input type="email" class="form-control" id="email" name="email" required placeholder="OTP will be sent here" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
                             </div>
                             <div class="mb-3">
                                 <label for="phone" class="form-label">Phone Number *</label>
-                                <input type="text" class="form-control" id="phone" name="phone" required placeholder="For OTP verification" pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits">
+                                <input type="text" class="form-control" id="phone" name="phone" required placeholder="Phone Number" pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits" value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>">
                             </div>
                             
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="pin_code" class="form-label">PIN Code *</label>
-                                    <input type="text" class="form-control" id="pin_code" name="pin_code" required maxlength="6" pattern="\d{6}" title="PIN code must be exactly 6 digits">
+                                    <input type="text" class="form-control" id="pin_code" name="pin_code" required maxlength="6" pattern="\d{6}" title="PIN code must be exactly 6 digits" value="<?php echo isset($_POST['pin_code']) ? htmlspecialchars($_POST['pin_code']) : ''; ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="location" class="form-label">Area / Location</label>
-                                    <input type="text" class="form-control" id="location" name="location">
+                                    <input type="text" class="form-control" id="location" name="location" value="<?php echo isset($_POST['location']) ? htmlspecialchars($_POST['location']) : ''; ?>">
                                 </div>
                             </div>
                             
                             <div class="mb-3">
                                 <label for="address_details" class="form-label">Detailed Address *</label>
-                                <textarea class="form-control" id="address_details" name="address_details" rows="2" required></textarea>
+                                <textarea class="form-control" id="address_details" name="address_details" rows="2" required><?php echo isset($_POST['address_details']) ? htmlspecialchars($_POST['address_details']) : ''; ?></textarea>
                             </div>
 
                             <div class="row">
@@ -135,8 +197,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                             </div>
 
-                            <button type="submit" class="btn btn-primary w-100">Register</button>
+                            <button type="submit" name="register_init" class="btn btn-primary w-100">Register</button>
                         </form>
+                         <?php else: ?>
+                            <form action="register.php" method="POST">
+                                <div class="text-center mb-4">
+                                    <i class="fas fa-envelope-open-text fa-3x text-primary mb-3"></i>
+                                    <h4>Verify your Email</h4>
+                                    <p class="text-muted">Enter the 6-digit code sent to your email.</p>
+                                </div>
+                                <div class="mb-3">
+                                    <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6">
+                                </div>
+                                <button type="submit" name="verify_otp" class="btn btn-success w-100">Verify & Create Account</button>
+                                <a href="register.php" class="btn btn-link w-100 mt-2">Cancel / Try Again</a>
+                            </form>
+                        <?php endif; ?>
                     </div>
                     <div class="card-footer text-center">
                         <small>Already have an account? <a href="login.php">Login here</a></small> <br>

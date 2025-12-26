@@ -1,0 +1,13 @@
+Starting Tests...
+Testing Customer OTP Flow...
+User created with ID: 5
+OTP generated and stored.
+SUCCESS: Customer OTP Validated correctly.
+Customer Cleanup done.
+--------------------------------
+Testing Worker OTP Flow...
+Worker created with ID: 6
+OTP generated and stored.
+SUCCESS: Worker OTP Validated correctly.
+Worker Cleanup done.
+--------------------------------

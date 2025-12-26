@@ -1,138 +1,203 @@
 <?php
 session_start();
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
+
+$otp_sent = false;
+$error = "";
+$success = "";
 
 // Fetch categories for the dropdown
 $stmt = $pdo->query("SELECT id, name FROM categories");
 $categories = $stmt->fetchAll();
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $name = trim($_POST['name']);
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
-    $phone = trim($_POST['phone']);
-    $service_category_id = $_POST['service_category_id'];
-    $bio = trim($_POST['bio']);
-    $hourly_rate = $_POST['hourly_rate'];
-    $pin_codes_input = trim($_POST['pin_code']);
-    $address = trim($_POST['address']);
-    $adhar_card = trim($_POST['adhar_card']);
-    $working_location = trim($_POST['working_location']);
 
-    // Validate and process multiple PIN codes
-    $pin_codes_array = array_map('trim', explode(',', $pin_codes_input));
-    $valid_pin_codes = [];
-    foreach ($pin_codes_array as $pin) {
-        if (preg_match('/^\d{6}$/', $pin)) {
-            $valid_pin_codes[] = $pin;
+    // STEP 1: INITIAL SUBMISSION (UPLOAD FILES & SEND OTP)
+    if (isset($_POST['register_init'])) {
+        $name = trim($_POST['name']);
+        $email = trim($_POST['email']);
+        $password = $_POST['password'];
+        $phone = trim($_POST['phone']);
+        $service_category_id = $_POST['service_category_id'];
+        $bio = trim($_POST['bio']);
+        $hourly_rate = $_POST['hourly_rate'];
+        $pin_codes_input = trim($_POST['pin_code']);
+        $address = trim($_POST['address']);
+        $adhar_card = trim($_POST['adhar_card']);
+        $working_location = trim($_POST['working_location']);
+    
+        // Validate and process multiple PIN codes
+        $pin_codes_array = array_map('trim', explode(',', $pin_codes_input));
+        $valid_pin_codes = [];
+        foreach ($pin_codes_array as $pin) {
+            if (preg_match('/^\d{6}$/', $pin)) {
+                $valid_pin_codes[] = $pin;
+            }
         }
-    }
-    $pin_code = implode(',', array_unique($valid_pin_codes)); // Remove duplicates
-
-    if (empty($name) || empty($email) || empty($password) || empty($service_category_id) || empty($pin_code) || empty($address) || empty($adhar_card)) {
-        $error = "Please fill all required fields.";
-    } else {
-         // Check password strength
-        if (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/', $password)) {
-            $error = "Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.";
-        } elseif (!preg_match('/^\d{10}$/', $phone)) {
-            $error = "Phone number must be exactly 10 digits.";
-        } elseif ($hourly_rate < 0) {
-            $error = "Hourly rate cannot be negative.";
+        $pin_code = implode(',', array_unique($valid_pin_codes)); // Remove duplicates
+    
+        if (empty($name) || empty($email) || empty($password) || empty($service_category_id) || empty($pin_code) || empty($address) || empty($adhar_card)) {
+            $error = "Please fill all required fields.";
         } else {
-             // Check if email exists
-            $stmt = $pdo->prepare("SELECT id FROM workers WHERE email = ?");
-            $stmt->execute([$email]);
-            if ($stmt->rowCount() > 0) {
-                $error = "Email already exists.";
+             // Check password strength
+            if (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/', $password)) {
+                $error = "Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.";
+            } elseif (!preg_match('/^\d{10}$/', $phone)) {
+                $error = "Phone number must be exactly 10 digits.";
+            } elseif ($hourly_rate < 0) {
+                $error = "Hourly rate cannot be negative.";
             } else {
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                
-                // Handle ID Document & Profile Image Uploads
-                $aadhar_photo = "";
-                $pan_photo = "";
-                $profile_image = "default.png";
-                
-                $doc_upload_dir = '../uploads/documents/';
-                $worker_upload_dir = '../uploads/workers/';
-                
-                if (!is_dir($doc_upload_dir)) mkdir($doc_upload_dir, 0777, true);
-                if (!is_dir($worker_upload_dir)) mkdir($worker_upload_dir, 0777, true);
-
-                $allowed_doc_ext = ['jpg', 'jpeg', 'png', 'pdf'];
-                $allowed_img_ext = ['jpg', 'jpeg', 'png'];
-
-                // Profile Image
-                if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-                    $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
-                    if (in_array($ext, $allowed_img_ext)) {
-                        $profile_image = "worker_" . time() . "_" . uniqid() . "." . $ext;
-                        move_uploaded_file($_FILES['profile_image']['tmp_name'], $worker_upload_dir . $profile_image);
+                 // Check if email exists
+                $stmt = $pdo->prepare("SELECT id FROM workers WHERE email = ?");
+                $stmt->execute([$email]);
+                if ($stmt->rowCount() > 0) {
+                    $error = "Email already exists.";
+                } else {
+                    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                    
+                    // Handle ID Document & Profile Image Uploads
+                    $aadhar_photo = "";
+                    $pan_photo = "";
+                    $profile_image = "default.png";
+                    $signature_photo = "";
+                    $previous_work_images = "";
+                    
+                    $doc_upload_dir = '../uploads/documents/';
+                    $worker_upload_dir = '../uploads/workers/';
+                    $work_upload_dir = '../uploads/work_images/';
+                    
+                    if (!is_dir($doc_upload_dir)) mkdir($doc_upload_dir, 0777, true);
+                    if (!is_dir($worker_upload_dir)) mkdir($worker_upload_dir, 0777, true);
+                    if (!is_dir($work_upload_dir)) mkdir($work_upload_dir, 0777, true);
+    
+                    $allowed_doc_ext = ['jpg', 'jpeg', 'png', 'pdf'];
+                    $allowed_img_ext = ['jpg', 'jpeg', 'png'];
+    
+                    // Profile Image
+                    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
+                        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
+                        if (in_array($ext, $allowed_img_ext)) {
+                            $profile_image = "worker_" . time() . "_" . uniqid() . "." . $ext;
+                            move_uploaded_file($_FILES['profile_image']['tmp_name'], $worker_upload_dir . $profile_image);
+                        }
                     }
-                }
-
-                // Aadhar Photo
-                if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
-                    $ext = strtolower(pathinfo($_FILES['aadhar_photo']['name'], PATHINFO_EXTENSION));
-                    if (in_array($ext, $allowed_doc_ext)) {
-                        $aadhar_photo = "aadhar_" . time() . "_" . uniqid() . "." . $ext;
-                        move_uploaded_file($_FILES['aadhar_photo']['tmp_name'], $doc_upload_dir . $aadhar_photo);
+    
+                    // Aadhar Photo
+                    if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
+                        $ext = strtolower(pathinfo($_FILES['aadhar_photo']['name'], PATHINFO_EXTENSION));
+                        if (in_array($ext, $allowed_doc_ext)) {
+                            $aadhar_photo = "aadhar_" . time() . "_" . uniqid() . "." . $ext;
+                            move_uploaded_file($_FILES['aadhar_photo']['tmp_name'], $doc_upload_dir . $aadhar_photo);
+                        }
                     }
-                }
-
-                // PAN Photo
-                if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
-                    $ext = strtolower(pathinfo($_FILES['pan_photo']['name'], PATHINFO_EXTENSION));
-                    if (in_array($ext, $allowed_doc_ext)) {
-                        $pan_photo = "pan_" . time() . "_" . uniqid() . "." . $ext;
-                        move_uploaded_file($_FILES['pan_photo']['tmp_name'], $doc_upload_dir . $pan_photo);
+    
+                    // PAN Photo
+                    if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
+                        $ext = strtolower(pathinfo($_FILES['pan_photo']['name'], PATHINFO_EXTENSION));
+                        if (in_array($ext, $allowed_doc_ext)) {
+                            $pan_photo = "pan_" . time() . "_" . uniqid() . "." . $ext;
+                            move_uploaded_file($_FILES['pan_photo']['tmp_name'], $doc_upload_dir . $pan_photo);
+                        }
                     }
-                }
-
-                // Signature Photo
-                $signature_photo = "";
-                if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
-                    $ext = strtolower(pathinfo($_FILES['signature_photo']['name'], PATHINFO_EXTENSION));
-                    if (in_array($ext, $allowed_img_ext)) {
-                        $signature_photo = "sig_" . time() . "_" . uniqid() . "." . $ext;
-                        move_uploaded_file($_FILES['signature_photo']['tmp_name'], $doc_upload_dir . $signature_photo);
+    
+                    // Signature Photo
+                    if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
+                        $ext = strtolower(pathinfo($_FILES['signature_photo']['name'], PATHINFO_EXTENSION));
+                        if (in_array($ext, $allowed_img_ext)) {
+                            $signature_photo = "sig_" . time() . "_" . uniqid() . "." . $ext;
+                            move_uploaded_file($_FILES['signature_photo']['tmp_name'], $doc_upload_dir . $signature_photo);
+                        }
                     }
-                }
-
-                // Previous Work Images (Multiple)
-                $work_images_paths = [];
-                $work_upload_dir = '../uploads/work_images/';
-                if (!is_dir($work_upload_dir)) mkdir($work_upload_dir, 0777, true);
-
-                if (isset($_FILES['previous_work_images'])) {
-                    $total_files = count($_FILES['previous_work_images']['name']);
-                    for ($i = 0; $i < $total_files; $i++) {
-                        if ($_FILES['previous_work_images']['error'][$i] == 0) {
-                            $ext = strtolower(pathinfo($_FILES['previous_work_images']['name'][$i], PATHINFO_EXTENSION));
-                            if (in_array($ext, $allowed_img_ext)) {
-                                $new_name = "work_" . time() . "_" . uniqid() . "_" . $i . "." . $ext;
-                                if (move_uploaded_file($_FILES['previous_work_images']['tmp_name'][$i], $work_upload_dir . $new_name)) {
-                                    $work_images_paths[] = $new_name;
+    
+                    // Previous Work Images (Multiple)
+                    $work_images_paths = [];
+                    if (isset($_FILES['previous_work_images'])) {
+                        $total_files = count($_FILES['previous_work_images']['name']);
+                        for ($i = 0; $i < $total_files; $i++) {
+                            if ($_FILES['previous_work_images']['error'][$i] == 0) {
+                                $ext = strtolower(pathinfo($_FILES['previous_work_images']['name'][$i], PATHINFO_EXTENSION));
+                                if (in_array($ext, $allowed_img_ext)) {
+                                    $new_name = "work_" . time() . "_" . uniqid() . "_" . $i . "." . $ext;
+                                    if (move_uploaded_file($_FILES['previous_work_images']['tmp_name'][$i], $work_upload_dir . $new_name)) {
+                                        $work_images_paths[] = $new_name;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                $previous_work_images = implode(',', $work_images_paths); // Store as comma-separated string
-
-                if (empty($aadhar_photo) || empty($pan_photo) || $profile_image == "default.png" || empty($signature_photo)) {
-                    $error = "Please upload your profile photo, Aadhar card, PAN card, and Signature.";
-                } else {
-                    $sql = "INSERT INTO workers (name, profile_image, email, password, phone, service_category_id, bio, hourly_rate, status, pin_code, address, adhar_card, aadhar_photo, pan_photo, signature_photo, previous_work_images, working_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)";
-                    $stmt = $pdo->prepare($sql);
-                    
-                    if ($stmt->execute([$name, $profile_image, $email, $hashed_password, $phone, $service_category_id, $bio, $hourly_rate, $pin_code, $address, $adhar_card, $aadhar_photo, $pan_photo, $signature_photo, $previous_work_images, $working_location])) {
-                        $success = "Registration successful! Your account is pending approval from admin.";
+                    $previous_work_images = implode(',', $work_images_paths); 
+    
+                    if (empty($aadhar_photo) || empty($pan_photo) || $profile_image == "default.png" || empty($signature_photo)) {
+                        $error = "Please upload all required photos and documents.";
                     } else {
-                        $error = "Something went wrong. Please try again.";
+                        // All good, save to session
+                        $_SESSION['temp_worker'] = [
+                            'name' => $name,
+                            'profile_image' => $profile_image,
+                            'email' => $email,
+                            'password' => $hashed_password,
+                            'phone' => $phone,
+                            'service_category_id' => $service_category_id,
+                            'bio' => $bio,
+                            'hourly_rate' => $hourly_rate,
+                            'pin_code' => $pin_code,
+                            'address' => $address,
+                            'adhar_card' => $adhar_card,
+                            'aadhar_photo' => $aadhar_photo,
+                            'pan_photo' => $pan_photo,
+                            'signature_photo' => $signature_photo,
+                            'previous_work_images' => $previous_work_images,
+                            'working_location' => $working_location
+                        ];
+                        
+                         // Generate OTP
+                        $otp = rand(100000, 999999);
+                        $_SESSION['register_worker_otp'] = $otp;
+    
+                        // Send OTP via Email
+                        $mail_result = sendOTPEmail($email, $otp, $name);
+                        
+                        if ($mail_result['status']) {
+                            $success = "OTP sent to $email. Please check your inbox.";
+                             $otp_sent = true;
+                        } else {
+                            $error = "Error sending email: " . $mail_result['message'];
+                            $otp_sent = false;
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // STEP 2: VERIFY OTP AND CREATE WORKER
+    elseif (isset($_POST['verify_otp'])) {
+        $entered_otp = trim($_POST['otp']);
+        
+        if (!isset($_SESSION['register_worker_otp']) || !isset($_SESSION['temp_worker'])) {
+             $error = "Session expired. Please register again.";
+             $otp_sent = false;
+        } elseif ($entered_otp == $_SESSION['register_worker_otp']) {
+            $w = $_SESSION['temp_worker'];
+            
+            $sql = "INSERT INTO workers (name, profile_image, email, password, phone, service_category_id, bio, hourly_rate, status, pin_code, address, adhar_card, aadhar_photo, pan_photo, signature_photo, previous_work_images, working_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)";
+            $stmt = $pdo->prepare($sql);
+            
+            if ($stmt->execute([$w['name'], $w['profile_image'], $w['email'], $w['password'], $w['phone'], $w['service_category_id'], $w['bio'], $w['hourly_rate'], $w['pin_code'], $w['address'], $w['adhar_card'], $w['aadhar_photo'], $w['pan_photo'], $w['signature_photo'], $w['previous_work_images'], $w['working_location']])) {
+                $success = "Registration successful! Your account is pending approval from admin.";
+                $otp_sent = false; // Show success message with login link
+                
+                // Clear session
+                unset($_SESSION['temp_worker']);
+                unset($_SESSION['register_worker_otp']);
+            } else {
+                 $error = "Something went wrong. Please try again.";
+            }
+        } else {
+             $error = "Invalid OTP. Please try again.";
+             $otp_sent = true;
+             $success = "Please enter the OTP sent to your email.";
         }
     }
 }
@@ -176,11 +241,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="alert alert-success"><?php echo $success; ?> <a href="login.php" class="alert-link">Login here</a></div>
                         <?php endif; ?>
                         
+                        <?php if(!$otp_sent): ?>
                         <form action="register.php" method="POST" enctype="multipart/form-data">
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="name" class="form-label">Full Name *</label>
-                                    <input type="text" class="form-control" id="name" name="name" required>
+                                    <input type="text" class="form-control" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="profile_image" class="form-label">Profile Photo * <small class="text-muted">(JPG, PNG)</small></label>
@@ -191,18 +257,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="email" class="form-label">Email Address *</label>
-                                    <input type="email" class="form-control" id="email" name="email" required>
+                                    <input type="email" class="form-control" id="email" name="email" required placeholder="OTP will be sent here" value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="phone" class="form-label">Phone Number *</label>
-                                    <input type="text" class="form-control" id="phone" name="phone" required pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits">
+                                    <input type="text" class="form-control" id="phone" name="phone" required pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits" value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>">
                                 </div>
                             </div>
                             
                             <div class="row">
                                 <div class="col-md-6 mb-3 text-start">
                                     <label for="adhar_card" class="form-label">Adhaar Card No. *</label>
-                                    <input type="text" class="form-control" id="adhar_card" name="adhar_card" required maxlength="12" placeholder="12-digit number">
+                                    <input type="text" class="form-control" id="adhar_card" name="adhar_card" required maxlength="12" placeholder="12-digit number" value="<?php echo isset($_POST['adhar_card']) ? htmlspecialchars($_POST['adhar_card']) : ''; ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                 </div>
@@ -235,7 +301,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <label for="pin_code" class="form-label">Service Area PIN Codes * <small class="text-muted">(You can add multiple)</small></label>
                                     <div id="pinCodeContainer">
                                         <div class="input-group mb-2 pin-code-group">
-                                            <input type="text" class="form-control pin-code-input" name="pin_codes[]" required maxlength="6" pattern="\d{6}" placeholder="e.g. 110001">
+                                            <input type="text" class="form-control pin-code-input" name="pin_codes[]" required maxlength="6" pattern="\d{6}" placeholder="e.g. 110001" value="<?php echo isset($_POST['pin_codes'][0]) ? htmlspecialchars($_POST['pin_codes'][0]) : ''; ?>">
                                             <button type="button" class="btn btn-outline-success btn-add-pin"><i class="fas fa-plus"></i></button>
                                         </div>
                                     </div>
@@ -247,13 +313,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="row">
                                 <div class="col-md-12 mb-3">
                                     <label for="working_location" class="form-label">Preferred Working Area</label>
-                                    <input type="text" class="form-control" id="working_location" name="working_location" placeholder="e.g. South Delhi">
+                                    <input type="text" class="form-control" id="working_location" name="working_location" placeholder="e.g. South Delhi" value="<?php echo isset($_POST['working_location']) ? htmlspecialchars($_POST['working_location']) : ''; ?>">
                                 </div>
                             </div>
 
                             <div class="mb-3">
                                 <label for="address" class="form-label">Full Residential Address *</label>
-                                <textarea class="form-control" id="address" name="address" rows="2" required></textarea>
+                                <textarea class="form-control" id="address" name="address" rows="2" required><?php echo isset($_POST['address']) ? htmlspecialchars($_POST['address']) : ''; ?></textarea>
                             </div>
 
                             <div class="row">
@@ -262,13 +328,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <select class="form-select" id="service_category_id" name="service_category_id" required>
                                         <option value="">Select Category</option>
                                         <?php foreach($categories as $cat): ?>
-                                            <option value="<?php echo $cat['id']; ?>"><?php echo $cat['name']; ?></option>
+                                            <option value="<?php echo $cat['id']; ?>" <?php echo (isset($_POST['service_category_id']) && $_POST['service_category_id'] == $cat['id']) ? 'selected' : ''; ?>><?php echo $cat['name']; ?></option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="hourly_rate" class="form-label">Hourly Rate (₹)</label>
-                                    <input type="number" step="0.01" min="0" class="form-control" id="hourly_rate" name="hourly_rate" placeholder="e.g. 100.00">
+                                    <input type="number" step="0.01" min="0" class="form-control" id="hourly_rate" name="hourly_rate" placeholder="e.g. 100.00" value="<?php echo isset($_POST['hourly_rate']) ? htmlspecialchars($_POST['hourly_rate']) : ''; ?>">
                                 </div>
                             </div>
                             
@@ -295,12 +361,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                  </div>
                                  <div class="col-md-6 mb-3">
                                       <label for="bio" class="form-label">Short Bio / Experience</label>
-                                      <textarea class="form-control" id="bio" name="bio" rows="4"></textarea>
+                                      <textarea class="form-control" id="bio" name="bio" rows="4"><?php echo isset($_POST['bio']) ? htmlspecialchars($_POST['bio']) : ''; ?></textarea>
                                  </div>
                             </div>
 
-                            <button type="submit" class="btn btn-warning w-100">Register as Worker</button>
+                            <button type="submit" name="register_init" class="btn btn-warning w-100">Register as Worker</button>
                         </form>
+                        <?php else: ?>
+                            <form action="register.php" method="POST">
+                                <div class="text-center mb-4">
+                                    <i class="fas fa-envelope-open-text fa-3x text-warning mb-3"></i>
+                                    <h4>Verify your Email</h4>
+                                    <p class="text-muted">Enter the 6-digit code sent to your email.</p>
+                                </div>
+                                <div class="mb-3">
+                                    <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6">
+                                </div>
+                                <button type="submit" name="verify_otp" class="btn btn-dark w-100">Verify & Complete Registration</button>
+                                <a href="register.php" class="btn btn-link w-100 mt-2 text-dark">Cancel / Try Again</a>
+                            </form>
+                        <?php endif; ?>
                     </div>
                     <div class="card-footer text-center">
                         <small>Already have an account? <a href="login.php">Login here</a></small> <br>

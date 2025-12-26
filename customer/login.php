@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
 
 $error = "";
 $success = "";
@@ -12,7 +13,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (isset($_POST['send_otp'])) {
         $email = trim($_POST['email']);
         if (empty($email)) {
-            $error = "Please enter your email to get OTP.";
+            $error = "Please enter your email to reset password.";
         } else {
             // Check if user exists
             $stmt = $pdo->prepare("SELECT id, name FROM users WHERE email = ?");
@@ -28,9 +29,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $update = $pdo->prepare("UPDATE users SET otp = ?, otp_expires_at = ? WHERE id = ?");
                 $update->execute([$otp, $expiry, $user['id']]);
 
-                // Simulate OTP Sending (Displaying it for demo)
-                $success = "OTP sent to your email. (SIMULATION: Your OTP is <strong>$otp</strong>)";
-                $otp_sent = true;
+                // Send OTP via Email
+                $mail_result = sendOTPEmail($email, $otp, $user['name']);
+
+                if ($mail_result['status']) {
+                    $success = "OTP sent to your email. Please check your inbox.";
+                    $otp_sent = true;
+                } else {
+                    $error = "Error sending email: " . $mail_result['message'];
+                    $otp_sent = false;
+                }
             } else {
                 $error = "Email not found.";
             }
@@ -143,15 +151,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <li id="req-special" class="invalid"><i class="fas fa-times-circle"></i> At least one special character</li>
                                     </ul>
                                 </div>
-                                <button type="submit" name="login_password" class="btn btn-success w-100 mb-2">Login with Password</button>
-                                <button type="submit" name="send_otp" class="btn btn-outline-primary w-100">Login with OTP</button>
+                                </div>
+                                <button type="submit" name="login_password" class="btn btn-success w-100 mb-2">Login</button>
+                                <div class="text-center mt-2">
+                                    <button type="submit" name="send_otp" class="btn btn-link text-decoration-none p-0">Forgot Password?</button>
+                                </div>
                             <?php else: ?>
                                 <div class="mb-3">
                                     <label for="otp" class="form-label">Enter OTP</label>
                                     <input type="text" class="form-control" id="otp" name="otp" required placeholder="6-digit code">
                                 </div>
                                 <button type="submit" name="login_otp" class="btn btn-primary w-100 mb-2">Verify & Login</button>
-                                <a href="login.php" class="btn btn-link w-100">Back to Password Login</a>
+                                <a href="login.php" class="btn btn-link w-100">Back to Login</a>
                             <?php endif; ?>
                         </form>
                     </div>
