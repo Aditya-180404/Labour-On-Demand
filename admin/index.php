@@ -1,26 +1,34 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/captcha.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = trim($_POST['username']);
-    $password = $_POST['password'];
-
-    if (empty($username) || empty($password)) {
-        $error = "Please fill all fields.";
+    // Validate CAPTCHA
+    if (!isset($_POST['g-recaptcha-response']) || empty($_POST['g-recaptcha-response'])) {
+        $error = "Please check the CAPTCHA box.";
+    } elseif (!verifyCaptcha($_POST['g-recaptcha-response'])) {
+        $error = "CAPTCHA verification failed. Please try again.";
     } else {
-        $stmt = $pdo->prepare("SELECT id, username, password FROM admin WHERE username = ?");
-        $stmt->execute([$username]);
-        $admin = $stmt->fetch();
+        $username = trim($_POST['username']);
+        $password = $_POST['password'];
 
-        if ($admin && password_verify($password, $admin['password'])) {
-            $_SESSION['admin_logged_in'] = true;
-            $_SESSION['admin_id'] = $admin['id'];
-            $_SESSION['admin_username'] = $admin['username'];
-            header("Location: dashboard.php");
-            exit;
+        if (empty($username) || empty($password)) {
+            $error = "Please fill all fields.";
         } else {
-            $error = "Invalid credentials.";
+            $stmt = $pdo->prepare("SELECT id, username, password FROM admin WHERE username = ?");
+            $stmt->execute([$username]);
+            $admin = $stmt->fetch();
+
+            if ($admin && password_verify($password, $admin['password'])) {
+                $_SESSION['admin_logged_in'] = true;
+                $_SESSION['admin_id'] = $admin['id'];
+                $_SESSION['admin_username'] = $admin['username'];
+                header("Location: dashboard.php");
+                exit;
+            } else {
+                $error = "Invalid credentials.";
+            }
         }
     }
 }
@@ -32,7 +40,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login - Labour On Demand</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../assets/css/admin_login.css">
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body>
     <div class="container mt-5">
@@ -54,6 +64,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
                                 <input type="password" class="form-control" id="password" name="password" required>
+                            </div>
+                            <div class="mb-3 text-center">
+                                <div class="g-recaptcha d-inline-block" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
                             </div>
                             <button type="submit" class="btn btn-danger w-100">Login</button>
                         </form>

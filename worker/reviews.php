@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 
 // Check if worker is logged in
@@ -104,6 +104,6 @@ $reviews = $reviews_stmt->fetchAll();
 
     <?php include '../includes/worker_footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/laubour/assets/js/theme.js"></script>
+    <script src="<?php echo BASE_URL; ?>/assets/js/theme.js"></script>
 </body>
 </html>

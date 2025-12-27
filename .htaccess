@@ -1,0 +1,34 @@
+# Disable directory browsing
+Options -Indexes
+
+# Limit request body size to 100MB
+LimitRequestBody 104857600
+
+# Increase PHP upload limits (if allowed by server config)
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 100M
+    php_value post_max_size 100M
+    php_value memory_limit 256M
+</IfModule>
+
+<IfModule mod_php.c>
+    php_value upload_max_filesize 100M
+    php_value post_max_size 100M
+    php_value memory_limit 256M
+</IfModule>
+
+# Block access to sensitive files
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "^(composer\.json|composer\.lock|package\.json|package-lock\.json)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "\.(sql|log|ini|env|md)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

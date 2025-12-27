@@ -1,10 +1,11 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
 
 // Check User Login
 if (!isset($_SESSION['user_id'])) {
-    header("Location: ../login.php");
+    header("Location: login.php");
     exit;
 }
 
@@ -12,44 +13,123 @@ $user_id = $_SESSION['user_id'];
 $success = "";
 $error = "";
 
+// Handle OTP Generation for Profile Update (AJAX endpoint)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
+    require_once '../includes/mailer.php';
+    
+    $stmt = $pdo->prepare("SELECT email, name FROM users WHERE id = ?");
+    $stmt->execute([$user_id]);
+    $user_data = $stmt->fetch();
+    
+    $otp = rand(100000, 999999);
+    $expiry = date("Y-m-d H:i:s", strtotime("+10 minutes"));
+    
+    $pdo->prepare("UPDATE users SET otp = ?, otp_expires_at = ? WHERE id = ?")
+        ->execute([$otp, $expiry, $user_id]);
+    
+    $mail_result = sendOTPEmail($user_data['email'], $otp, $user_data['name']);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'status' => $mail_result['status'] ? 'success' : 'error',
+        'message' => $mail_result['status'] ? 'OTP sent to ' . $user_data['email'] : $mail_result['message']
+    ]);
+    exit;
+}
+
 // Handle Form Submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $name = trim($_POST['name']);
+    $email = trim($_POST['email']);
+    $new_password = $_POST['new_password'];
     $phone = trim($_POST['phone']);
     $address = trim($_POST['address']);
     $pin_code = trim($_POST['pin_code']);
     $location = trim($_POST['location']);
+    $otp_entered = trim($_POST['profile_otp'] ?? '');
+
+    // Check if sensitive fields changed
+    $stmt = $pdo->prepare("SELECT email, password FROM users WHERE id = ?");
+    $stmt->execute([$user_id]);
+    $current_user = $stmt->fetch();
+
+    $email_changed = ($email !== $current_user['email']);
+    $password_changed = !empty($new_password);
+
+    if ($email_changed || $password_changed) {
+        // Verify OTP
+        $stmt_otp = $pdo->prepare("SELECT otp, otp_expires_at FROM users WHERE id = ?");
+        $stmt_otp->execute([$user_id]);
+        $otp_data = $stmt_otp->fetch();
+
+        if (empty($otp_entered) || $otp_data['otp'] !== $otp_entered || strtotime($otp_data['otp_expires_at']) < time()) {
+            $error = "Invalid or expired OTP. Please verify your identity to change email/password.";
+        } else {
+            // Clear OTP after successful verification
+            $pdo->prepare("UPDATE users SET otp = NULL WHERE id = ?")->execute([$user_id]);
+        }
+        
+        // Check email uniqueness if changed
+        if ($email_changed) {
+            $stmt_check = $pdo->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
+            $stmt_check->execute([$email, $user_id]);
+            if ($stmt_check->fetch()) {
+                $error = "This email is already registered by another user.";
+            }
+        }
+    }
 
     // Handle File Upload
-    $profile_image = null;
+    $profile_image_url = null;
+    $profile_image_public_id = null;
+
     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-        $upload_dir = '../uploads/users/';
-        if (!is_dir($upload_dir)) mkdir($upload_dir, 0777, true);
+        $allowed_img_ext = array('jpg', 'jpeg', 'png', 'webp');
+        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
         
-        $ext = pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION);
-        $filename = "user_" . $user_id . "_" . time() . "." . $ext;
-        $target_file = $upload_dir . $filename;
-        
-        $allowiv = array('jpg', 'jpeg', 'png', 'gif');
-        if (in_array(strtolower($ext), $allowiv)) {
-             if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $target_file)) {
-                 $profile_image = $filename;
-             } else {
-                 $error = "Failed to upload image.";
-             }
+        if (in_array($ext, $allowed_img_ext)) {
+            if ($_FILES['profile_image']['size'] > 15 * 1024 * 1024) {
+                $error = "File size exceeds 15MB limit.";
+            } else {
+                $cld = CloudinaryHelper::getInstance();
+                
+                // Fetch old public_id to delete
+                $stmt = $pdo->prepare("SELECT profile_image_public_id FROM users WHERE id = ?");
+                $stmt->execute([$user_id]);
+                $old_data = $stmt->fetch();
+                
+                $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_USERS, 'standard');
+                
+                if ($upload) {
+                    $profile_image_url = $upload['url'];
+                    $profile_image_public_id = $upload['public_id'];
+                    
+                    // Delete old image if it exists
+                    if ($old_data && $old_data['profile_image_public_id']) {
+                        $cld->deleteImage($old_data['profile_image_public_id']);
+                    }
+                } else {
+                    $error = "Failed to upload to cloud storage.";
+                }
+            }
         } else {
-            $error = "Invalid file type. Only JPG, PNG, GIF allowed.";
+            $error = "Invalid file type. Only JPG, PNG, WEBP allowed.";
         }
     }
 
     if (!$error) {
         // Prepare Query
-        $sql = "UPDATE users SET name = ?, phone = ?, address_details = ?, pin_code = ?, location = ?";
-        $params = [$name, $phone, $address, $pin_code, $location];
+        $sql = "UPDATE users SET name = ?, email = ?, phone = ?, address_details = ?, pin_code = ?, location = ?";
+        $params = [$name, $email, $phone, $address, $pin_code, $location];
 
-        if ($profile_image) {
-            $sql .= ", profile_image = ?";
-            $params[] = $profile_image;
+        if ($password_changed) {
+            $sql .= ", password = ?";
+            $params[] = password_hash($new_password, PASSWORD_DEFAULT);
+        }
+
+        if ($profile_image_url) {
+            $sql .= ", profile_image = ?, profile_image_public_id = ?";
+            $params[] = $profile_image_url;
+            $params[] = $profile_image_public_id;
         }
 
         $sql .= " WHERE id = ?";
@@ -106,7 +186,7 @@ $user = $stmt->fetch();
                             <div class="text-center mb-4">
                                 <?php 
                                     $img_src = $user['profile_image'] && $user['profile_image'] != 'default.png' 
-                                        ? "../uploads/users/" . $user['profile_image'] 
+                                        ? $user['profile_image'] 
                                         : "https://via.placeholder.com/150"; 
                                 ?>
                                 <img src="<?php echo $img_src; ?>" alt="Profile" class="profile-img-preview mb-3">
@@ -122,8 +202,27 @@ $user = $stmt->fetch();
                                     <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($user['name']); ?>" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
+                                    <label for="email" class="form-label">Email Address <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <input type="email" class="form-control sensitive-field" id="email" name="email" value="<?php echo htmlspecialchars($user['email']); ?>" required data-original="<?php echo htmlspecialchars($user['email']); ?>">
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
                                     <label for="phone" class="form-label">Phone Number</label>
                                     <input type="tel" class="form-control" id="phone" name="phone" value="<?php echo htmlspecialchars($user['phone']); ?>">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="new_password" class="form-label">New Password <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control sensitive-field" id="new_password" name="new_password" placeholder="Leave blank to keep current">
+                                        <button class="btn btn-outline-secondary" type="button" id="togglePassword"><i class="fas fa-eye"></i></button>
+                                    </div>
+                                    <ul class="password-requirements mt-2 small" id="pass-reqs" style="display:none;">
+                                        <li id="req-length" class="text-muted"><i class="fas fa-circle"></i> 8+ chars</li>
+                                        <li id="req-upper" class="text-muted"><i class="fas fa-circle"></i> Uppercase</li>
+                                        <li id="req-special" class="text-muted"><i class="fas fa-circle"></i> Special</li>
+                                    </ul>
                                 </div>
                             </div>
 
@@ -143,8 +242,18 @@ $user = $stmt->fetch();
                                 </div>
                             </div>
 
+                            <div id="otpSection" class="mb-3 border p-3 rounded bg-light" style="display: none;">
+                                <label for="profile_otp" class="form-label fw-bold"><i class="fas fa-shield-alt me-2 text-primary"></i>Identity Verification</label>
+                                <p class="small text-muted mb-2">Changing email or password requires verification. An OTP will be sent to your current email.</p>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="profile_otp" name="profile_otp" placeholder="Enter 6-digit OTP">
+                                    <button class="btn btn-primary" type="button" id="sendOtpBtn">Send OTP</button>
+                                </div>
+                                <div id="otpStatus" class="mt-2 small"></div>
+                            </div>
+
                             <div class="d-grid gap-2">
-                                <button type="submit" class="btn btn-primary">Update Profile</button>
+                                <button type="submit" id="updateBtn" class="btn btn-primary">Update Profile</button>
                                 <a href="dashboard.php" class="btn btn-secondary">Back to Dashboard</a>
                             </div>
                         </form>
@@ -155,6 +264,110 @@ $user = $stmt->fetch();
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const sensitiveFields = document.querySelectorAll('.sensitive-field');
+            const otpSection = document.getElementById('otpSection');
+            const sendOtpBtn = document.getElementById('sendOtpBtn');
+            const updateBtn = document.getElementById('updateBtn');
+            const passInput = document.getElementById('new_password');
+            const passReqs = document.getElementById('pass-reqs');
+            
+            // Password toggle
+            document.getElementById('togglePassword').addEventListener('click', function() {
+                const type = passInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                passInput.setAttribute('type', type);
+                this.querySelector('i').classList.toggle('fa-eye');
+                this.querySelector('i').classList.toggle('fa-eye-slash');
+            });
+
+            // Detect changes
+            function checkChanges() {
+                let changed = false;
+                sensitiveFields.forEach(field => {
+                    if (field.id === 'email') {
+                        if (field.value !== field.dataset.original) changed = true;
+                    } else if (field.id === 'new_password') {
+                        if (field.value.length > 0) changed = true;
+                    }
+                });
+
+                if (changed) {
+                    otpSection.style.display = 'block';
+                    document.getElementById('profile_otp').required = true;
+                } else {
+                    otpSection.style.display = 'none';
+                    document.getElementById('profile_otp').required = false;
+                }
+            }
+
+            sensitiveFields.forEach(field => {
+                field.addEventListener('input', () => {
+                    checkChanges();
+                    if (field.id === 'new_password') {
+                        passReqs.style.display = field.value.length > 0 ? 'block' : 'none';
+                        updateRequirements(field.value);
+                    }
+                });
+            });
+
+            function updateRequirements(val) {
+                const reqs = [
+                    { id: 'req-length', valid: val.length >= 8 },
+                    { id: 'req-upper', valid: /[A-Z]/.test(val) },
+                    { id: 'req-special', valid: /[@$!%*?&]/.test(val) }
+                ];
+                reqs.forEach(req => {
+                    const el = document.getElementById(req.id);
+                    el.className = req.valid ? 'text-success' : 'text-danger';
+                    el.querySelector('i').className = req.valid ? 'fas fa-check-circle' : 'fas fa-times-circle';
+                });
+            }
+
+            // AJAX Send OTP
+            sendOtpBtn.addEventListener('click', function() {
+                sendOtpBtn.disabled = true;
+                sendOtpBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending...';
+                
+                const formData = new FormData();
+                formData.append('send_profile_otp', '1');
+                
+                fetch('edit_profile.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const status = document.getElementById('otpStatus');
+                    status.className = 'mt-2 small ' + (data.status === 'success' ? 'text-success' : 'text-danger');
+                    status.innerText = data.message;
+                    
+                    if(data.status === 'success') {
+                        let timeLeft = 30;
+                        const timer = setInterval(() => {
+                            if(timeLeft <= 0) {
+                                clearInterval(timer);
+                                sendOtpBtn.disabled = false;
+                                sendOtpBtn.innerText = 'Resend OTP';
+                            } else {
+                                sendOtpBtn.innerText = `Wait ${timeLeft}s`;
+                                timeLeft--;
+                            }
+                        }, 1000);
+                    } else {
+                        sendOtpBtn.disabled = false;
+                        sendOtpBtn.innerText = 'Retry Sending';
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    sendOtpBtn.disabled = false;
+                    sendOtpBtn.innerText = 'Error - Retry';
+                });
+            });
+        });
+    </script>
     <?php include '../includes/footer.php'; ?>
 </body>
 </html>

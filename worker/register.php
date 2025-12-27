@@ -1,7 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
+require_once '../includes/cloudinary_helper.php';
 
 $otp_sent = false;
 $error = "";
@@ -12,9 +13,40 @@ $stmt = $pdo->query("SELECT id, name FROM categories");
 $categories = $stmt->fetchAll();
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Check if POST data is lost because it exceeded post_max_size
+    if (empty($_POST) && $_SERVER['CONTENT_LENGTH'] > 0) {
+        $max_size = ini_get('post_max_size');
+        $error = "The uploaded file size is too large (Total: " . round($_SERVER['CONTENT_LENGTH'] / 1024 / 1024, 2) . "MB). The limit is approximately $max_size. Please use smaller images or contact support.";
+    } else {
+        require_once '../includes/captcha.php';
 
+        // Validate CAPTCHA and CSRF
+        $captcha_valid = isset($_POST['g-recaptcha-response']) && verifyCaptcha($_POST['g-recaptcha-response']);
+        $csrf_valid = isset($_POST['csrf_token']) && verifyCSRF($_POST['csrf_token']);
+
+        if (!$captcha_valid) {
+            $debug_info = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'post_set' => isset($_POST['g-recaptcha-response']),
+                'post_data_count' => count($_POST),
+                'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 'N/A'
+            ];
+            file_put_contents('c:/xampp/htdocs/laubour/register_debug.log', "CAPTCHA FAIL: " . print_r($debug_info, true), FILE_APPEND);
+            $error = "CAPTCHA verification failed. Please try again.";
+        }
+        elseif (!$csrf_valid) {
+            $csrf_debug = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'post_token' => $_POST['csrf_token'] ?? 'MISSING',
+                'session_token' => $_SESSION['csrf_token'] ?? 'MISSING',
+                'session_id' => session_id(),
+                'post_keys' => array_keys($_POST)
+            ];
+            file_put_contents('c:/xampp/htdocs/laubour/csrf_debug.log', "CSRF FAIL: " . print_r($csrf_debug, true), FILE_APPEND);
+            $error = "Security validation failed (CSRF mismatch). This can happen if the upload took too long or the session expired. Please try with fewer images or smaller files.";
+        }
     // STEP 1: INITIAL SUBMISSION (UPLOAD FILES & SEND OTP)
-    if (isset($_POST['register_init'])) {
+    elseif (isset($_POST['register_init'])) {
         $name = trim($_POST['name']);
         $email = trim($_POST['email']);
         $password = $_POST['password'];
@@ -56,85 +88,80 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 } else {
                     $hashed_password = password_hash($password, PASSWORD_DEFAULT);
                     
-                    // Handle ID Document & Profile Image Uploads
-                    $aadhar_photo = "";
-                    $pan_photo = "";
-                    $profile_image = "default.png";
-                    $signature_photo = "";
-                    $previous_work_images = "";
+                    // Handle ID Document & Profile Image Uploads (CLOUD STORAGE)
+                    $profile_image_url = "default.png";
+                    $profile_image_public_id = null;
+                    $aadhar_photo_url = "";
+                    $aadhar_photo_public_id = null;
+                    $pan_photo_url = "";
+                    $pan_photo_public_id = null;
+                    $signature_photo_url = "";
+                    $signature_photo_public_id = null;
+                    $previous_work_urls = [];
+                    $previous_work_public_ids = [];
                     
-                    $doc_upload_dir = '../uploads/documents/';
-                    $worker_upload_dir = '../uploads/workers/';
-                    $work_upload_dir = '../uploads/work_images/';
-                    
-                    if (!is_dir($doc_upload_dir)) mkdir($doc_upload_dir, 0777, true);
-                    if (!is_dir($worker_upload_dir)) mkdir($worker_upload_dir, 0777, true);
-                    if (!is_dir($work_upload_dir)) mkdir($work_upload_dir, 0777, true);
-    
-                    $allowed_doc_ext = ['jpg', 'jpeg', 'png', 'pdf'];
-                    $allowed_img_ext = ['jpg', 'jpeg', 'png'];
-    
+                    $cld = CloudinaryHelper::getInstance();
+
                     // Profile Image
                     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-                        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
-                        if (in_array($ext, $allowed_img_ext)) {
-                            $profile_image = "worker_" . time() . "_" . uniqid() . "." . $ext;
-                            move_uploaded_file($_FILES['profile_image']['tmp_name'], $worker_upload_dir . $profile_image);
+                        $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
+                        if ($upload) {
+                            $profile_image_url = $upload['url'];
+                            $profile_image_public_id = $upload['public_id'];
                         }
                     }
     
                     // Aadhar Photo
                     if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
-                        $ext = strtolower(pathinfo($_FILES['aadhar_photo']['name'], PATHINFO_EXTENSION));
-                        if (in_array($ext, $allowed_doc_ext)) {
-                            $aadhar_photo = "aadhar_" . time() . "_" . uniqid() . "." . $ext;
-                            move_uploaded_file($_FILES['aadhar_photo']['tmp_name'], $doc_upload_dir . $aadhar_photo);
+                        $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
+                        if ($upload) {
+                            $aadhar_photo_url = $upload['url'];
+                            $aadhar_photo_public_id = $upload['public_id'];
                         }
                     }
     
                     // PAN Photo
                     if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
-                        $ext = strtolower(pathinfo($_FILES['pan_photo']['name'], PATHINFO_EXTENSION));
-                        if (in_array($ext, $allowed_doc_ext)) {
-                            $pan_photo = "pan_" . time() . "_" . uniqid() . "." . $ext;
-                            move_uploaded_file($_FILES['pan_photo']['tmp_name'], $doc_upload_dir . $pan_photo);
+                        $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
+                        if ($upload) {
+                            $pan_photo_url = $upload['url'];
+                            $pan_photo_public_id = $upload['public_id'];
                         }
                     }
     
                     // Signature Photo
                     if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
-                        $ext = strtolower(pathinfo($_FILES['signature_photo']['name'], PATHINFO_EXTENSION));
-                        if (in_array($ext, $allowed_img_ext)) {
-                            $signature_photo = "sig_" . time() . "_" . uniqid() . "." . $ext;
-                            move_uploaded_file($_FILES['signature_photo']['tmp_name'], $doc_upload_dir . $signature_photo);
+                        $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
+                        if ($upload) {
+                            $signature_photo_url = $upload['url'];
+                            $signature_photo_public_id = $upload['public_id'];
                         }
                     }
     
                     // Previous Work Images (Multiple)
-                    $work_images_paths = [];
                     if (isset($_FILES['previous_work_images'])) {
                         $total_files = count($_FILES['previous_work_images']['name']);
                         for ($i = 0; $i < $total_files; $i++) {
                             if ($_FILES['previous_work_images']['error'][$i] == 0) {
-                                $ext = strtolower(pathinfo($_FILES['previous_work_images']['name'][$i], PATHINFO_EXTENSION));
-                                if (in_array($ext, $allowed_img_ext)) {
-                                    $new_name = "work_" . time() . "_" . uniqid() . "_" . $i . "." . $ext;
-                                    if (move_uploaded_file($_FILES['previous_work_images']['tmp_name'][$i], $work_upload_dir . $new_name)) {
-                                        $work_images_paths[] = $new_name;
-                                    }
+                                $upload = $cld->uploadImage($_FILES['previous_work_images']['tmp_name'][$i], CLD_FOLDER_WORKER_PREV_WORK, 'high-res');
+                                if ($upload) {
+                                    $previous_work_urls[] = $upload['url'];
+                                    $previous_work_public_ids[] = $upload['public_id'];
                                 }
                             }
                         }
                     }
-                    $previous_work_images = implode(',', $work_images_paths); 
+                    $previous_work_images = implode(',', $previous_work_urls); 
+                    $previous_work_ids = implode(',', $previous_work_public_ids);
     
-                    if (empty($aadhar_photo) || empty($pan_photo) || $profile_image == "default.png" || empty($signature_photo)) {
+                    if (empty($aadhar_photo_url) || empty($pan_photo_url) || $profile_image_url == "default.png" || empty($signature_photo_url)) {
                         $error = "Please upload all required photos and documents.";
                     } else {
                         // All good, save to session
                         $_SESSION['temp_worker'] = [
                             'name' => $name,
-                            'profile_image' => $profile_image,
+                            'profile_image' => $profile_image_url,
+                            'profile_image_public_id' => $profile_image_public_id,
                             'email' => $email,
                             'password' => $hashed_password,
                             'phone' => $phone,
@@ -144,10 +171,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             'pin_code' => $pin_code,
                             'address' => $address,
                             'adhar_card' => $adhar_card,
-                            'aadhar_photo' => $aadhar_photo,
-                            'pan_photo' => $pan_photo,
-                            'signature_photo' => $signature_photo,
+                            'aadhar_photo' => $aadhar_photo_url,
+                            'aadhar_photo_public_id' => $aadhar_photo_public_id,
+                            'pan_photo' => $pan_photo_url,
+                            'pan_photo_public_id' => $pan_photo_public_id,
+                            'signature_photo' => $signature_photo_url,
+                            'signature_photo_public_id' => $signature_photo_public_id,
                             'previous_work_images' => $previous_work_images,
+                            'previous_work_public_ids' => $previous_work_ids,
                             'working_location' => $working_location
                         ];
                         
@@ -181,10 +212,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } elseif ($entered_otp == $_SESSION['register_worker_otp']) {
             $w = $_SESSION['temp_worker'];
             
-            $sql = "INSERT INTO workers (name, profile_image, email, password, phone, service_category_id, bio, hourly_rate, status, pin_code, address, adhar_card, aadhar_photo, pan_photo, signature_photo, previous_work_images, working_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO workers (name, profile_image, profile_image_public_id, email, password, phone, service_category_id, bio, hourly_rate, status, pin_code, address, adhar_card, aadhar_photo, aadhar_photo_public_id, pan_photo, pan_photo_public_id, signature_photo, signature_photo_public_id, previous_work_images, previous_work_public_ids, working_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             $stmt = $pdo->prepare($sql);
             
-            if ($stmt->execute([$w['name'], $w['profile_image'], $w['email'], $w['password'], $w['phone'], $w['service_category_id'], $w['bio'], $w['hourly_rate'], $w['pin_code'], $w['address'], $w['adhar_card'], $w['aadhar_photo'], $w['pan_photo'], $w['signature_photo'], $w['previous_work_images'], $w['working_location']])) {
+            if ($stmt->execute([$w['name'], $w['profile_image'], $w['profile_image_public_id'], $w['email'], $w['password'], $w['phone'], $w['service_category_id'], $w['bio'], $w['hourly_rate'], $w['pin_code'], $w['address'], $w['adhar_card'], $w['aadhar_photo'], $w['aadhar_photo_public_id'], $w['pan_photo'], $w['pan_photo_public_id'], $w['signature_photo'], $w['signature_photo_public_id'], $w['previous_work_images'], $w['previous_work_public_ids'], $w['working_location']])) {
                 $success = "Registration successful! Your account is pending approval from admin.";
                 $otp_sent = false; // Show success message with login link
                 
@@ -201,6 +232,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -213,6 +245,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <link rel="stylesheet" href="../assets/css/theme.css">
     <link rel="stylesheet" href="../assets/css/worker_register.css">
     <script src="../assets/js/theme.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <style>
         .password-container { position: relative; }
         .toggle-password { position: absolute; right: 10px; top: 38px; cursor: pointer; color: #6c757d; }
@@ -241,8 +274,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="alert alert-success"><?php echo $success; ?> <a href="login.php" class="alert-link">Login here</a></div>
                         <?php endif; ?>
                         
-                        <?php if(!$otp_sent): ?>
-                        <form action="register.php" method="POST" enctype="multipart/form-data">
+                        <?php if(empty($otp_sent) || $otp_sent == false): ?>
+                        <form method="POST" action="register.php" enctype="multipart/form-data" id="registerForm">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <!-- Personal Details -->
+                            <h4 class="mb-3">Personal Information</h4>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="name" class="form-label">Full Name *</label>
@@ -291,8 +328,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <input type="file" class="form-control" id="signature_photo" name="signature_photo" required accept=".jpg,.jpeg,.png">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label for="previous_work_images" class="form-label">Previous Work Pictures * <small class="text-muted">(Multiple allowed)</small></label>
-                                    <input type="file" class="form-control" id="previous_work_images" name="previous_work_images[]" multiple required accept=".jpg,.jpeg,.png">
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label class="form-label">Previous Work Pictures * <small class="text-muted">(You can add multiple)</small></label>
+                                    <div id="workImagesContainer">
+                                        <div class="input-group mb-2 work-image-group">
+                                            <input type="file" class="form-control work-image-input" name="previous_work_images[]" required accept=".jpg,.jpeg,.png">
+                                            <button type="button" class="btn btn-outline-success btn-add-work-image"><i class="fas fa-plus"></i></button>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Upload pictures of your past work to show to customers</small>
                                 </div>
                             </div>
 
@@ -365,10 +413,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                  </div>
                             </div>
 
+
+
+                            <div class="mb-3">
+                                <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                            </div>
                             <button type="submit" name="register_init" class="btn btn-warning w-100">Register as Worker</button>
                         </form>
                         <?php else: ?>
                             <form action="register.php" method="POST">
+                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                 <div class="text-center mb-4">
                                     <i class="fas fa-envelope-open-text fa-3x text-warning mb-3"></i>
                                     <h4>Verify your Email</h4>
@@ -376,6 +430,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                                 <div class="mb-3">
                                     <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6">
+                                </div>
+                                <div class="mb-3">
+                                    <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
                                 </div>
                                 <button type="submit" name="verify_otp" class="btn btn-dark w-100">Verify & Complete Registration</button>
                                 <a href="register.php" class="btn btn-link w-100 mt-2 text-dark">Cancel / Try Again</a>
@@ -494,7 +551,40 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     return false;
                 }
                 
+                // CAPTCHA check
+                if (typeof grecaptcha !== 'undefined') {
+                    var response = grecaptcha.getResponse();
+                    if (response.length === 0) {
+                        e.preventDefault();
+                        alert("Please check the CAPTCHA box to verify you are not a robot.");
+                        return false;
+                    }
+                }
+
                 document.getElementById('pin_code_hidden').value = pinCodes.join(',');
+            });
+        });
+
+        // Dynamic Work Images Management
+        document.addEventListener('DOMContentLoaded', function() {
+            const container = document.getElementById('workImagesContainer');
+            
+            // Add Work Image field
+            container.addEventListener('click', function(e) {
+                if (e.target.closest('.btn-add-work-image')) {
+                    const newGroup = document.createElement('div');
+                    newGroup.className = 'input-group mb-2 work-image-group';
+                    newGroup.innerHTML = `
+                        <input type="file" class="form-control work-image-input" name="previous_work_images[]" accept=".jpg,.jpeg,.png">
+                        <button type="button" class="btn btn-outline-danger btn-remove-work-image"><i class="fas fa-minus"></i></button>
+                    `;
+                    container.appendChild(newGroup);
+                }
+                
+                // Remove Work Image field
+                if (e.target.closest('.btn-remove-work-image')) {
+                    e.target.closest('.work-image-group').remove();
+                }
             });
         });
     </script>

@@ -1,0 +1,329 @@
+2025-12-27 06:24:41 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T05:24:02Z",
+  "hostname": "localhost"
+}
+2025-12-27 06:25:03 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T05:24:41Z",
+  "hostname": "localhost"
+}
+2025-12-27 06:26:48 - Empty Response received.
+2025-12-27 06:26:50 - Empty Response received.
+2025-12-27 06:27:34 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T05:27:04Z",
+  "hostname": "localhost"
+}
+2025-12-27 06:30:19 - Response len: 1721
+Curl Error: Connection timed out after 5015 milliseconds
+2025-12-27 12:16:44 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:16:30Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:27:58 - Response len: 1764
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:27:47Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:30:08 - Response len: 1764
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:27:47Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:30:20 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:30:09Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:37:19 - Response len: 1657
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:36:50Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:37:33 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:37:19Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:54:15 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:54:02Z",
+  "hostname": "localhost"
+}
+2025-12-27 12:58:11 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T11:53:45Z",
+  "hostname": "localhost"
+}
+2025-12-27 13:06:26 - Response len: 1678
+Google API Result: {
+  "success": false,
+  "error-codes": [
+    "timeout-or-duplicate"
+  ]
+}
+2025-12-27 13:07:27 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T12:06:27Z",
+  "hostname": "localhost"
+}
+2025-12-27 13:12:00 - Response len: 1678
+Google API Result: {
+  "success": false,
+  "error-codes": [
+    "timeout-or-duplicate"
+  ]
+}
+2025-12-27 13:12:05 - Response len: 1678
+Google API Result: {
+  "success": false,
+  "error-codes": [
+    "timeout-or-duplicate"
+  ]
+}
+2025-12-27 13:15:24 - Response len: 1764
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T12:12:06Z",
+  "hostname": "localhost"
+}
+2025-12-27 13:16:14 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T12:15:30Z",
+  "hostname": "localhost"
+}
+2025-12-27 13:16:42 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T12:16:20Z",
+  "hostname": "localhost"
+}
+2025-12-27 13:18:15 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T12:17:19Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:03:52 - Response len: 1742
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:03:13Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:10:05 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:09:46Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:13:41 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:12:57Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:14:35 - Response len: 1742
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:13:52Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:21:47 - Response len: 1785
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:21:33Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:56:09 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:55:27Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:59:00 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:58:13Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:59:16 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:59:01Z",
+  "hostname": "localhost"
+}
+2025-12-27 15:59:48 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T14:59:16Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:00:26 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:00:02Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:01:05 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:00:31Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:01:12 - Response len: 1700
+Google API Result: {
+  "success": false,
+  "error-codes": [
+    "timeout-or-duplicate"
+  ]
+}
+2025-12-27 16:01:29 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:01:13Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:01:57 - Empty Response received.
+2025-12-27 16:02:01 - Empty Response received.
+2025-12-27 16:02:23 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:02:01Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:02:51 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:02:28Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:05:04 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:02:51Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:05:48 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:05:09Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:14:03 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:13:34Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:14:41 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:14:08Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:21:06 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:17:12Z",
+  "hostname": "localhost"
+}
+2025-12-27 16:40:52 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T15:40:31Z",
+  "hostname": "localhost"
+}
+2025-12-27 17:21:15 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T16:20:52Z",
+  "hostname": "localhost"
+}
+2025-12-27 17:22:39 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T16:22:24Z",
+  "hostname": "localhost"
+}
+2025-12-27 17:24:49 - Response len: 1678
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T16:20:41Z",
+  "hostname": "localhost"
+}
+2025-12-27 17:24:55 - Response len: 1678
+Google API Result: {
+  "success": false,
+  "error-codes": [
+    "timeout-or-duplicate"
+  ]
+}
+2025-12-27 17:25:19 - Response len: 1764
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T16:24:55Z",
+  "hostname": "localhost"
+}
+2025-12-27 17:39:56 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T16:39:15Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:23:47 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:23:13Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:25:43 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:24:59Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:26:52 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:26:19Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:36:30 - Response len: 1721
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:36:14Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:37:58 - Response len: 1764
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:37:19Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:40:41 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:40:12Z",
+  "hostname": "localhost"
+}
+2025-12-27 18:41:03 - Response len: 1700
+Google API Result: {
+  "success": true,
+  "challenge_ts": "2025-12-27T17:40:42Z",
+  "hostname": "localhost"
+}

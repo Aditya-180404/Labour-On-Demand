@@ -1,4 +1,6 @@
 <?php
+if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.');
+
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -52,5 +54,23 @@ function sendOTPEmail($to_email, $otp, $name = 'User') {
     $altBody = "Hello $name, Your OTP code is: $otp. Regards, Team Labour On Demand";
 
     return sendEmail($to_email, $name, $subject, $body, $altBody);
+}
+
+function sendBookingCompletionOTP($to_email, $otp, $customer_name, $worker_name) {
+    $subject = "Job Completion Verification - Labour On Demand";
+    $body = "
+        <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
+            <h2 style='color: #0d6efd;'>Job Completion Request</h2>
+            <p>Hello <strong>$customer_name</strong>,</p>
+            <p>Your worker, <strong>$worker_name</strong>, has marked the job as completed.</p>
+            <p>To verify this and authorize the completion, please provide the following OTP to the worker:</p>
+            <h1 style='background: #e9ecef; padding: 10px; display: inline-block; border-radius: 5px; color: #495057; letter-spacing: 5px;'>$otp</h1>
+            <p><strong>Note:</strong> Only share this code if you are satisfied that the work is done.</p>
+            <br>
+            <p>Regards,<br>Team Labour On Demand</p>
+        </div>
+    ";
+    $altBody = "Hello $customer_name, Worker $worker_name has finished the job. Share this OTP to verify: $otp";
+    return sendEmail($to_email, $customer_name, $subject, $body, $altBody);
 }
 ?>

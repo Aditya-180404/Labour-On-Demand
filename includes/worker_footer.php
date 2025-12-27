@@ -12,7 +12,8 @@ if (isset($_SESSION['worker_id'])) {
     $pre_email = $_SESSION['worker_email'] ?? '';
 }
 ?>
-<footer class="mt-5 py-5 border-top" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important; color: #cbd5e1;">
+<?php if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.'); ?>
+<footer class="mt-5 py-5 bg-dark text-white border-top border-secondary">
     <div class="container">
         <div class="row g-4">
             <!-- Company Info -->
@@ -87,6 +88,10 @@ if (isset($_SESSION['worker_id'])) {
                                 <i class="fas fa-paper-plane me-2"></i>Send Feedback
                             </button>
                         </div>
+                        <div class="col-12">
+                            <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                             <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+                        </div>
                         <div class="col-12 text-center mt-2">
                             <small class="text-white-50" style="font-size: 0.75rem;">
                                 Messaging as <span class="text-warning fw-bold">Pro Provider</span>
@@ -115,6 +120,7 @@ document.getElementById('workerFeedbackForm').addEventListener('submit', functio
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
     
     const formData = new FormData(form);
+    formData.append('g-recaptcha-response', grecaptcha.getResponse());
     
     fetch('<?php echo $base_path; ?>process_feedback.php', {
         method: 'POST',
@@ -139,3 +145,6 @@ document.getElementById('workerFeedbackForm').addEventListener('submit', functio
     });
 });
 </script>
+
+<?php include 'lightbox.php'; ?>
+<?php include 'toast.php'; ?>

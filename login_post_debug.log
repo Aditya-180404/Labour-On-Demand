@@ -1,0 +1,8 @@
+2025-12-27 16:14:59 - POST Data: Array
+(
+    [csrf_token] => 668ba6e64c8bd3e83b4e9815dd65850e7741a1bafe5088633daec27a05c1f5a7
+    [new_password] => Adi@12345
+    [confirm_password] => Adi@12345
+    [reset_password_action] => 
+)
+

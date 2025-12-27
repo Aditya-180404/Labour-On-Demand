@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Check if ID is provided
 if (!isset($_GET['id'])) {
@@ -102,17 +104,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
         $has_overlap = $overlap_stmt->fetchColumn() > 0;
 
         if ($has_overlap) {
-            $booking_error = "This worker is already booked during the selected time slot. Please choose another time.";
+            $_SESSION['toast_error'] = "This worker is already booked during the selected time slot. Please choose another time.";
+            header("Location: worker_profile.php?id=" . $worker_id);
+            exit;
         } else {
             $sql = "INSERT INTO bookings (user_id, worker_id, service_date, service_time, service_end_time, address, booking_latitude, booking_longitude, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')";
             $stmt = $pdo->prepare($sql);
             if ($stmt->execute([$user_id, $worker_id, $date, $time, $end_time, $address, $lat, $lng])) {
-                $booking_msg = "Booking request sent successfully! Duration: " . date('h:i A', $start_timestamp) . " to " . date('h:i A', $end_timestamp) . ". Please wait for the worker to accept.";
-                // Refresh booked slots for the message
-                $booked_slots_stmt->execute([$worker_id, $date]);
-                $booked_slots = $booked_slots_stmt->fetchAll();
-
-                // SEND EMAIL TO WORKER
                 // Fetch user name
                 $u_stmt = $pdo->prepare("SELECT name FROM users WHERE id = ?");
                 $u_stmt->execute([$user_id]);
@@ -130,16 +128,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                             <li><strong>Location:</strong> $address</li>
                         </ul>
                         <p>Please login to your dashboard to <strong>Accept</strong> or <strong>Reject</strong> this job.</p>
-                        <a href='http://localhost/laubour/worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
+                        <a href='http://" . $_SERVER['HTTP_HOST'] . BASE_URL . "/worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
                 
                 sendEmail($worker['email'], $worker['name'], $subject, $message);
 
-
+                $_SESSION['toast_success'] = "Booking request sent successfully! Duration: " . date('h:i A', $start_timestamp) . " to " . date('h:i A', $end_timestamp) . ". Please wait for the worker to accept.";
+                header("Location: worker_profile.php?id=" . $worker_id);
+                exit;
             } else {
-                $booking_error = "Failed to book worker.";
+                $_SESSION['toast_error'] = "Failed to book worker.";
+                header("Location: worker_profile.php?id=" . $worker_id);
+                exit;
             }
         }
     }
@@ -176,17 +178,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     <?php include '../includes/navbar.php'; ?>
 
     <div class="container profile-container">
-        <?php if($booking_msg): ?>
-            <div class="alert alert-success alert-dismissible fade show"><?php echo $booking_msg; ?> <a href="my_bookings.php">View Bookings</a><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-            <script>
-                setTimeout(function() {
-                    window.location.href = 'my_bookings.php';
-                }, 10000); // 10 seconds redirect
-            </script>
-        <?php endif; ?>
-        <?php if($booking_error): ?>
-            <div class="alert alert-danger alert-dismissible fade show"><?php echo $booking_error; ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-        <?php endif; ?>
 
         <div class="mb-4">
             <a href="workers.php" class="text-decoration-none text-muted">
@@ -195,15 +186,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
         </div>
 
         <div class="row">
-            <div class="col-lg-8">
+            <div class="col-lg-6">
                 <div class="card profile-card mb-4">
                     <div class="profile-header">
                         <?php 
                             $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
-                                ? "../uploads/workers/" . $worker['profile_image'] 
+                                ? $worker['profile_image'] 
                                 : "https://via.placeholder.com/150"; 
+                            
+                            if (filter_var($img_src, FILTER_VALIDATE_URL) === false) {
+                                echo $cld->getResponsiveImageTag($img_src, 'Profile', 'profile-img');
+                            } else {
+                                echo '<img src="'.$img_src.'" alt="Profile" class="profile-img">';
+                            }
                         ?>
-                        <img src="<?php echo $img_src; ?>" alt="Profile" class="profile-img">
                         <h2 class="mb-1"><?php echo htmlspecialchars($worker['name']); ?></h2>
                         <div class="mb-2">
                             <span class="badge bg-body-tertiary text-body shadow-sm">
@@ -257,13 +253,35 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                                 </ul>
                             </div>
                         </div>
+                </div>
+            </div>
 
-
+                <!-- Portfolio Section (Between Profile and Reviews, with Scrollbar) -->
+                <?php if ($worker['previous_work_images']): ?>
+                <div class="card profile-card border-0 mb-3" style="max-height: 500px; overflow-y: auto;">
+                    <div class="card-body p-4">
+                        <h5 class="section-title">Portfolio / Previous Work</h5>
+                        <div class="row g-2">
+                            <?php 
+                                $images = explode(',', $worker['previous_work_images']);
+                                foreach($images as $img): 
+                                    if (empty(trim($img))) continue;
+                                    $thumb = $cld->getUrl(trim($img), ['width' => 400, 'height' => 300, 'crop' => 'fill']);
+                                    $full = $cld->getUrl(trim($img));
+                            ?>
+                                <div class="col-md-6 col-12">
+                                    <a href="<?php echo $full; ?>" target="_blank">
+                                        <img src="<?php echo $thumb; ?>" class="img-fluid rounded shadow-sm portfolio-img" alt="Previous Work" style="height: 200px; width: 100%; object-fit: cover;">
+                                    </a>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </div>
+                <?php endif; ?>
 
-                <!-- Reviews Section -->
-                <div class="card profile-card mb-4 border-0">
+                <!-- Reviews Section (Below Portfolio, with Scrollbar) -->
+                <div class="card profile-card border-0" style="max-height: 500px; overflow-y: auto;">
                     <div class="card-body p-4">
                         <h5 class="section-title">Customer Reviews</h5>
                         <?php if (count($reviews) > 0): ?>
@@ -289,8 +307,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                     </div>
                 </div>
             </div>
+            <!-- End of Left Column (Profile + Reviews) -->
 
-            <div class="col-lg-4">
+            <!-- Right Column (Booking Form) -->
+            <!-- End of Profile Card Column -->
+
+            <!-- Booking Card Column -->
+            <div class="col-lg-6">
                 <?php if ($is_user && $worker['status'] == 'approved'): ?>
                 <div class="booking-card shadow-sm border-0">
                     <h4 class="mb-4 fw-bold">Book this Worker</h4>
@@ -313,41 +336,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                                     <i class="fas fa-location-arrow me-1"></i> Send Current GPS Location
                                 </button>
                             </div>
-                            <textarea name="address" id="addressField" class="form-control rounded-3" rows="3" required placeholder="Enter full address..."></textarea>
-                            <input type="hidden" name="latitude" id="latField">
-                            <input type="hidden" name="longitude" id="lngField">
-                            <div id="locationStatus" class="small mt-1 text-muted"></div>
+                            <textarea name="address" id="address" class="form-control rounded-3 px-3" rows="3" placeholder="Enter service address" required></textarea>
+                            <input type="hidden" name="latitude" id="latitude">
+                            <input type="hidden" name="longitude" id="longitude">
                         </div>
-
-                        <?php if(!empty($booked_slots) && empty($booking_msg)): ?>
-                        <div class="mb-3">
-                            <label class="form-label small text-danger fw-bold"><i class="fas fa-calendar-times me-1"></i> Occupied Slots (<?php echo date('M d', strtotime($selected_date)); ?>)</label>
-                            <div class="d-flex flex-wrap gap-2">
-                                <?php foreach($booked_slots as $slot): ?>
-                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill small py-1 px-2">
-                                        <?php echo date('h:i A', strtotime($slot['service_time'])); ?> - <?php echo date('h:i A', strtotime($slot['service_end_time'])); ?>
-                                    </span>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                        <?php endif; ?>
-
-                        <div class="alert alert-warning py-2 small border-0 mb-4">
-                            <i class="fas fa-info-circle me-1"></i> Pay directly to worker after service.
-                        </div>
-                        <button type="submit" name="book_worker" class="btn btn-warning w-100 rounded-pill py-2 fw-bold shadow-sm">Confirm Booking</button>
+                        <button type="submit" name="book_worker" class="btn btn-warning w-100 rounded-pill py-2 fw-bold">
+                            <i class="fas fa-calendar-check me-2"></i>Book Now
+                        </button>
                     </form>
-                </div>
-                <?php elseif (!$is_user && $worker['status'] == 'approved'): ?>
-                <div class="card border-0 shadow-sm p-4 text-center">
-                    <h5 class="mb-3">Want to book this worker?</h5>
-                    <p class="text-muted small">Please login as a customer to book services.</p>
-                    <a href="login.php" class="btn btn-primary rounded-pill w-100">Login Now</a>
                 </div>
                 <?php endif; ?>
             </div>
         </div>
+
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Use Registered Address
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>

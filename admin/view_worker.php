@@ -1,6 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Check Admin Login
 if (!isset($_SESSION['admin_logged_in'])) {
@@ -31,24 +33,49 @@ if (isset($_POST['update_status'])) {
 if (isset($_POST['doc_action'])) {
     $action = $_POST['doc_action'];
     if ($action === 'approve') {
-        $stmt = $pdo->prepare("SELECT profile_image, aadhar_photo, pan_photo, pending_profile_image, pending_aadhar_photo, pending_pan_photo FROM workers WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT profile_image, profile_image_public_id, aadhar_photo, aadhar_photo_public_id, pan_photo, pan_photo_public_id, signature_photo, signature_photo_public_id, pending_profile_image, pending_profile_image_public_id, pending_aadhar_photo, pending_aadhar_photo_public_id, pending_pan_photo, pending_pan_photo_public_id, pending_signature_photo, pending_signature_photo_public_id FROM workers WHERE id = ?");
         $stmt->execute([$worker_id]);
         $w = $stmt->fetch();
         
         $updates = [];
         $params = [];
-        if ($w['pending_profile_image']) { $updates[] = "profile_image = ?"; $params[] = $w['pending_profile_image']; }
-        if ($w['pending_aadhar_photo']) { $updates[] = "aadhar_photo = ?"; $params[] = $w['pending_aadhar_photo']; }
-        if ($w['pending_pan_photo']) { $updates[] = "pan_photo = ?"; $params[] = $w['pending_pan_photo']; }
+        if ($w['pending_profile_image']) { 
+            if ($w['profile_image'] && $w['profile_image'] != 'default.png') {
+                $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'profile', ?, ?)")->execute([$worker_id, $w['profile_image'], $w['profile_image_public_id']]);
+            }
+            $updates[] = "profile_image = ?"; $params[] = $w['pending_profile_image']; 
+            $updates[] = "profile_image_public_id = ?"; $params[] = $w['pending_profile_image_public_id']; 
+        }
+        if ($w['pending_aadhar_photo']) { 
+             if ($w['aadhar_photo']) {
+                $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'aadhar', ?, ?)")->execute([$worker_id, $w['aadhar_photo'], $w['aadhar_photo_public_id']]);
+            }
+            $updates[] = "aadhar_photo = ?"; $params[] = $w['pending_aadhar_photo']; 
+            $updates[] = "aadhar_photo_public_id = ?"; $params[] = $w['pending_aadhar_photo_public_id']; 
+        }
+        if ($w['pending_pan_photo']) { 
+             if ($w['pan_photo']) {
+                $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'pan', ?, ?)")->execute([$worker_id, $w['pan_photo'], $w['pan_photo_public_id']]);
+            }
+            $updates[] = "pan_photo = ?"; $params[] = $w['pending_pan_photo']; 
+            $updates[] = "pan_photo_public_id = ?"; $params[] = $w['pending_pan_photo_public_id']; 
+        }
+        if ($w['pending_signature_photo']) { 
+             if ($w['signature_photo']) {
+                $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'signature', ?, ?)")->execute([$worker_id, $w['signature_photo'], $w['signature_photo_public_id']]);
+            }
+            $updates[] = "signature_photo = ?"; $params[] = $w['pending_signature_photo']; 
+            $updates[] = "signature_photo_public_id = ?"; $params[] = $w['pending_signature_photo_public_id']; 
+        }
         
         if (!empty($updates)) {
-            $query = "UPDATE workers SET " . implode(', ', $updates) . ", pending_profile_image = NULL, pending_aadhar_photo = NULL, pending_pan_photo = NULL, doc_update_status = 'approved' WHERE id = ?";
+            $query = "UPDATE workers SET " . implode(', ', $updates) . ", pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'approved' WHERE id = ?";
             $params[] = $worker_id;
             $pdo->prepare($query)->execute($params);
-            $success_msg = "Documents updated and approved.";
+            $success_msg = "Documents updated and approved. Old photos moved to history.";
         }
     } else {
-        $pdo->prepare("UPDATE workers SET pending_profile_image = NULL, pending_aadhar_photo = NULL, pending_pan_photo = NULL, doc_update_status = 'rejected' WHERE id = ?")->execute([$worker_id]);
+        $pdo->prepare("UPDATE workers SET pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'rejected' WHERE id = ?")->execute([$worker_id]);
         $success_msg = "Document update request rejected.";
     }
     
@@ -78,401 +105,501 @@ $bookings_count_stmt = $pdo->prepare("SELECT COUNT(*) as total,
                                      FROM bookings WHERE worker_id = ?");
 $bookings_count_stmt->execute([$worker_id]);
 $stats = $bookings_count_stmt->fetch();
+
+// Fetch Completed Bookings (Income History)
+$income_stmt = $pdo->prepare("SELECT b.*, u.name as customer_name 
+                              FROM bookings b 
+                              LEFT JOIN users u ON b.user_id = u.id 
+                              WHERE b.worker_id = ? AND b.status = 'completed' 
+                              ORDER BY b.service_date DESC, b.service_time DESC");
+$income_stmt->execute([$worker_id]);
+$income_history = $income_stmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin: View Worker - <?php echo htmlspecialchars($worker['name']); ?></title>
+    <title>View Worker - Admin Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Admin Layout Styles from dashboard.php */
         .admin-sidebar { height: 100vh; background: #343a40; position: fixed; width: 250px; padding-top: 20px; z-index: 1000; }
         .admin-sidebar a { color: #cfd8dc; padding: 15px; display: block; text-decoration: none; border-left: 4px solid transparent; }
         .admin-sidebar a:hover, .admin-sidebar a.active { background: #495057; color: white; border-left-color: #ffc107; }
-        .main-content { margin-left: 250px; padding: 40px; background-color: #f4f7f6; min-height: 100vh; transition: all 0.3s; }
-        .worker-header { background: #fff; padding: 30px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 30px; }
-        .worker-img { width: 120px; height: 120px; object-fit: cover; border-radius: 15px; border: 3px solid #f1c40f; }
-        .card { border: none; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .status-badge { font-size: 0.9rem; padding: 5px 15px; border-radius: 20px; }
+        .main-content { margin-left: 250px; padding: 30px; min-height: 100vh; transition: all 0.3s; }
         
         @media (max-width: 768px) {
             .admin-sidebar { 
-                width: 100%; 
-                height: auto; 
-                position: relative; 
-                padding-top: 10px;
-                display: flex;
-                flex-direction: row;
-                flex-wrap: wrap;
-                justify-content: center;
+                width: 100%; height: auto; position: relative; padding-top: 10px;
+                display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center;
             }
             .admin-sidebar h4 { width: 100%; margin-bottom: 10px !important; }
             .admin-sidebar a { padding: 10px 15px; border-left: none; border-bottom: 3px solid transparent; }
             .admin-sidebar a:hover, .admin-sidebar a.active { border-left-color: transparent; border-bottom-color: #ffc107; }
-            .main-content { margin-left: 0; padding: 20px 15px; }
-            .worker-header { text-align: center; justify-content: center !important; }
-            .worker-header > div:first-child { flex-direction: column; text-align: center; }
-            .worker-header .text-md-end { text-align: center !important; }
+            .main-content { margin-left: 0; padding: 15px; }
+        }
+
+        :root { --primary-dark: #2c3e50; --accent: #f39c12; }
+        /* Match Admin Background */
+        body { font-family: 'Inter', sans-serif; background-color: #d5cc9dff; }
+        
+        .card { border: none; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); transition: background-color 0.3s ease; }
+        
+        .worker-img { 
+            width: 120px; height: 120px; object-fit: cover; 
+            border-radius: 50%; 
+            border: 4px solid #fff; /* Revert to white for Admin Theme */
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1); 
+        }
+        
+        .status-badge { padding: 8px 16px; border-radius: 50px; font-size: 0.85rem; }
+        
+        .stat-card { 
+            background-color: #fff; /* Revert to white for Admin Theme */
+            padding: 20px; border-radius: 15px; text-align: center; 
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        .stat-card i { font-size: 2rem; color: var(--accent); margin-bottom: 10px; }
+        
+        /* Enhanced label visibility - Default for Admin Theme */
+        .text-muted.small.fw-bold.text-uppercase,
+        label.text-muted {
+            opacity: 0.9;
+            font-weight: 600 !important;
+            color: #2c3e50 !important;
+        }
+
+        /* Tabs - Default for Admin Theme */
+        .nav-pills .nav-link {
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid #dee2e6;
+            color: #6c757d;
+            background-color: #f8f9fa;
+        }
+        
+        .nav-pills .nav-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .nav-pills .nav-link.active {
+            background-color: #0d6efd !important;
+            color: white !important;
+            border-color: #0d6efd !important;
+            box-shadow: 0 4px 12px rgba(13,110,253,0.3);
+        }
+
+        /* Custom Tab Logic to bypass Bootstrap completely */
+        .custom-tab-pane {
+            display: none;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        .custom-tab-pane.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
-
+    <!-- Admin Sidebar -->
     <div class="admin-sidebar">
         <h4 class="text-white text-center mb-4">Admin Panel</h4>
         <a href="dashboard.php"><i class="fas fa-tachometer-alt me-2"></i>Dashboard</a>
         <a href="../logout.php" class="text-danger"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
     </div>
 
+    <!-- Main Content -->
     <div class="main-content">
         <div class="container-fluid">
-            <?php if($success_msg): ?>
-                <div class="alert alert-success alert-dismissible fade show"><?php echo $success_msg; ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-            <?php endif; ?>
-            <?php if($error_msg): ?>
-                <div class="alert alert-danger alert-dismissible fade show"><?php echo $error_msg; ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-            <?php endif; ?>
+        <div class="mb-4 d-flex justify-content-end align-items-center">
+            <a href="dashboard.php" class="btn btn-outline-secondary rounded-pill"><i class="fas fa-arrow-left me-2"></i>Back to List</a>
+        </div>
 
-            <div class="mb-4">
-                <a href="dashboard.php" class="text-decoration-none text-muted"><i class="fas fa-arrow-left me-1"></i> Back to Dashboard</a>
+        <?php if($success_msg): ?>
+            <div class="alert alert-success alert-dismissible fade show rounded-pill px-4 shadow-sm border-0 mb-4" role="alert">
+                <i class="fas fa-check-circle me-2"></i> <?php echo $success_msg; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
+        <?php endif; ?>
 
-            <div class="worker-header d-flex align-items-center justify-content-between flex-wrap gap-4">
-                <div class="d-flex align-items-center gap-4">
-                    <?php 
-                        $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
-                            ? "../uploads/workers/" . $worker['profile_image'] 
-                            : "https://via.placeholder.com/150"; 
-                    ?>
-                    <img src="<?php echo $img_src; ?>" alt="Profile" class="worker-img">
-                    <div>
-                        <h2 class="mb-1 fw-bold"><?php echo htmlspecialchars($worker['name']); ?></h2>
-                        <div class="mb-2">
-                            <span class="badge bg-warning text-dark me-2">
-                                <i class="fas <?php echo $worker['category_icon'] ? $worker['category_icon'] : 'fa-user'; ?> me-1"></i>
-                                <?php echo htmlspecialchars($worker['category_name']); ?>
-                            </span>
-                            <span class="badge bg-<?php echo ($worker['is_available'] ? 'success' : 'secondary'); ?>">
-                                <?php echo $worker['is_available'] ? 'Online' : 'Offline'; ?>
-                            </span>
-                        </div>
-                        <p class="text-muted mb-0"><i class="far fa-calendar-alt me-1"></i> Joined: <?php echo date('M d, Y', strtotime($worker['created_at'])); ?></p>
+        <div class="row g-4">
+            <!-- Left Sidebar -->
+            <div class="col-lg-4">
+                <div class="card text-center p-4 mb-4">
+                    <div class="mb-3 position-relative d-inline-block mx-auto">
+                        <?php 
+                            $worker_img = ($worker['profile_image'] && $worker['profile_image'] != 'default.png') 
+                                ? $cld->getUrl($worker['profile_image'], ['width' => 240, 'height' => 240, 'crop' => 'fill', 'gravity' => 'face']) 
+                                : "https://via.placeholder.com/120"; 
+                        ?>
+                        <img src="<?php echo $worker_img; ?>" class="rounded-circle mb-3 worker-img">
+                        <span class="position-absolute bottom-0 end-0 p-2 bg-<?php echo ($worker['is_available'] ? 'success' : 'secondary'); ?> border border-2 border-white rounded-circle"></span>
                     </div>
-                </div>
-                
-                <div class="text-md-end">
-                    <p class="mb-2">Account Status: 
-                        <span class="status-badge bg-<?php echo ($worker['status'] == 'approved' ? 'success' : ($worker['status'] == 'pending' ? 'warning' : 'danger')); ?> text-white fw-bold">
+                    <h3 class="fw-bold mb-1"><?php echo htmlspecialchars($worker['name']); ?></h3>
+                    <p class="text-muted"><i class="fas <?php echo $worker['category_icon'] ? $worker['category_icon'] : 'fa-user'; ?> me-2"></i><?php echo htmlspecialchars($worker['category_name']); ?></p>
+                    
+                    <div class="d-flex justify-content-center gap-2 mb-4">
+                        <span class="status-badge bg-<?php echo ($worker['status'] == 'approved' ? 'success' : ($worker['status'] == 'pending' ? 'warning' : 'danger')); ?> text-white">
                             <?php echo ucfirst($worker['status']); ?>
                         </span>
-                    </p>
-                    <form method="POST" class="d-flex gap-2 justify-content-md-end mt-3">
-                        <select name="status" class="form-select form-select-sm" style="width: auto;">
-                            <option value="pending" <?php echo $worker['status'] == 'pending' ? 'selected' : ''; ?>>Pending</option>
-                            <option value="approved" <?php echo $worker['status'] == 'approved' ? 'selected' : ''; ?>>Approved</option>
-                            <option value="rejected" <?php echo $worker['status'] == 'rejected' ? 'selected' : ''; ?>>Rejected</option>
-                        </select>
-                        <button type="submit" name="update_status" class="btn btn-dark btn-sm rounded-pill px-4">Update Status</button>
+                    </div>
+
+                    <form method="POST" class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase text-muted">Update Account Status</label>
+                        <div class="input-group">
+                            <select name="status" class="form-select border-0 bg-transparent text-body">
+                                <option value="pending" <?php echo $worker['status'] == 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                <option value="approved" <?php echo $worker['status'] == 'approved' ? 'selected' : ''; ?>>Approved</option>
+                                <option value="rejected" <?php echo $worker['status'] == 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                            </select>
+                            <button type="submit" name="update_status" class="btn btn-primary"><i class="fas fa-save"></i></button>
+                        </div>
                     </form>
+                    <hr>
+                    <div class="text-start">
+                        <label class="text-muted small fw-bold text-uppercase mb-2 d-block">Contact Info</label>
+                        <p class="mb-1"><i class="fas fa-envelope me-2 text-primary"></i><?php echo htmlspecialchars($worker['email']); ?></p>
+                        <p class="mb-0"><i class="fas fa-phone me-2 text-primary"></i><?php echo htmlspecialchars($worker['phone']); ?></p>
+                    </div>
                 </div>
-            </div>
 
-            <?php if($worker['doc_update_status'] == 'pending'): ?>
-            <div class="card mb-4 border-danger border-2 shadow">
-                <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-file-signature me-2"></i>Pending Document/Photo Update Request</h5>
-                    <form method="POST" class="d-flex gap-2">
-                        <button type="submit" name="doc_action" value="approve" class="btn btn-success btn-sm px-4">Approve All</button>
-                        <button type="submit" name="doc_action" value="reject" class="btn btn-light btn-sm px-4">Reject All</button>
-                    </form>
+                <div class="row g-3 mb-4">
+                    <div class="col-6">
+                        <div class="stat-card">
+                            <i class="fas fa-briefcase"></i>
+                            <h4 class="fw-bold mb-0"><?php echo $stats['completed']; ?></h4>
+                            <small class="text-muted text-uppercase" style="font-size: 0.65rem;">Jobs Done</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="stat-card">
+                            <i class="fas fa-wallet"></i>
+                            <h4 class="fw-bold mb-0">₹<?php echo number_format($stats['total_earned']); ?></h4>
+                            <small class="text-muted text-uppercase" style="font-size: 0.65rem;">Earned</small>
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted small mb-4">The worker has requested the following changes. Compare old vs new before approving.</p>
-                    <div class="row text-center g-4">
-                        <?php if($worker['pending_profile_image']): ?>
-                        <div class="col-md-4">
-                            <div class="p-3 border rounded bg-light h-100">
-                                <label class="fw-bold d-block mb-3 text-uppercase small text-primary">Profile Photo</label>
-                                <div class="row">
-                                    <div class="col-6">
-                                        <small class="d-block text-muted mb-1">Current</small>
-                                        <img src="../uploads/workers/<?php echo $worker['profile_image']; ?>" class="rounded-circle shadow-sm" style="width: 80px; height: 80px; object-fit: cover;">
-                                    </div>
-                                    <div class="col-6 border-start">
-                                        <small class="d-block text-danger mb-1 fw-bold">NEW</small>
-                                        <img src="../uploads/workers/<?php echo $worker['pending_profile_image']; ?>" class="rounded-circle shadow border border-danger" style="width: 80px; height: 80px; object-fit: cover;">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endif; ?>
 
-                        <?php if($worker['pending_aadhar_photo']): ?>
-                        <div class="col-md-4">
-                            <div class="p-3 border rounded bg-light h-100">
-                                <label class="fw-bold d-block mb-3 text-uppercase small text-primary">Aadhar Card</label>
-                                <div class="row">
-                                    <div class="col-6">
-                                        <small class="d-block text-muted mb-1">Current</small>
-                                        <?php if(strtolower(pathinfo($worker['aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                            <i class="fas fa-file-pdf fa-2x text-muted"></i>
-                                        <?php else: ?>
-                                            <img src="../uploads/documents/<?php echo $worker['aadhar_photo']; ?>" class="rounded shadow-sm" style="width: 100%; max-height: 80px; object-fit: cover;">
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="col-6 border-start">
-                                        <small class="d-block text-danger mb-1 fw-bold">NEW</small>
-                                        <?php if(strtolower(pathinfo($worker['pending_aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                            <i class="fas fa-file-pdf fa-2x text-danger"></i>
-                                            <br><a href="../uploads/documents/<?php echo $worker['pending_aadhar_photo']; ?>" target="_blank" class="small">Open PDF</a>
-                                        <?php else: ?>
-                                            <img src="../uploads/documents/<?php echo $worker['pending_aadhar_photo']; ?>" class="rounded shadow border border-danger" style="width: 100%; max-height: 80px; object-fit: cover;">
-                                            <br><a href="../uploads/documents/<?php echo $worker['pending_aadhar_photo']; ?>" target="_blank" class="small">Full View</a>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endif; ?>
+                <!-- Income History Widget -->
+                <div class="card p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                         <h5 class="fw-bold mb-0 text-primary"><i class="fas fa-receipt me-2"></i>Income</h5>
+                    </div>
+                    
+                    <div class="input-group input-group-sm mb-3">
+                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
+                        <input type="text" id="incomeSearch" class="form-control bg-light border-start-0" placeholder="Search customer, date...">
+                    </div>
 
-                        <?php if($worker['pending_pan_photo']): ?>
-                        <div class="col-md-4">
-                            <div class="p-3 border rounded bg-light h-100">
-                                <label class="fw-bold d-block mb-3 text-uppercase small text-primary">PAN Card</label>
-                                <div class="row">
-                                    <div class="col-6">
-                                        <small class="d-block text-muted mb-1">Current</small>
-                                        <?php if(strtolower(pathinfo($worker['pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                            <i class="fas fa-file-pdf fa-2x text-muted"></i>
-                                        <?php else: ?>
-                                            <img src="../uploads/documents/<?php echo $worker['pan_photo']; ?>" class="rounded shadow-sm" style="width: 100%; max-height: 80px; object-fit: cover;">
-                                        <?php endif; ?>
+                    <div class="income-scroll-container" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
+                        <?php if($income_history): ?>
+                            <div class="list-group list-group-flush" id="incomeList">
+                                <?php foreach($income_history as $payment): ?>
+                                <div class="list-group-item px-0 py-3 border-bottom income-item">
+                                    <div class="d-flex justify-content-between align-items-start mb-1">
+                                        <h6 class="fw-bold mb-0 text-truncate" style="max-width: 60%;"><?php echo htmlspecialchars($payment['customer_name']); ?></h6>
+                                        <span class="badge bg-success bg-opacity-10 text-success rounded-pill">+₹<?php echo number_format($payment['amount_paid']); ?></span>
                                     </div>
-                                    <div class="col-6 border-start">
-                                        <small class="d-block text-danger mb-1 fw-bold">NEW</small>
-                                        <?php if(strtolower(pathinfo($worker['pending_pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                            <i class="fas fa-file-pdf fa-2x text-danger"></i>
-                                            <br><a href="../uploads/documents/<?php echo $worker['pending_pan_photo']; ?>" target="_blank" class="small">Open PDF</a>
-                                        <?php else: ?>
-                                            <img src="../uploads/documents/<?php echo $worker['pending_pan_photo']; ?>" class="rounded shadow border border-danger" style="width: 100%; max-height: 80px; object-fit: cover;">
-                                            <br><a href="../uploads/documents/<?php echo $worker['pending_pan_photo']; ?>" target="_blank" class="small">Full View</a>
-                                        <?php endif; ?>
+                                    <div class="d-flex align-items-center text-muted small mb-1">
+                                        <i class="fas fa-calendar-alt me-2" style="width: 12px;"></i>
+                                        <span><?php echo date('d M Y', strtotime($payment['service_date'])); ?></span>
+                                        <span class="mx-1">•</span>
+                                        <span><?php echo date('h:i A', strtotime($payment['service_time'])); ?></span>
                                     </div>
+                                    <div class="d-flex align-items-start text-muted small">
+                                        <i class="fas fa-map-marker-alt me-2 mt-1" style="width: 12px;"></i>
+                                        <span class="text-truncate" style="max-width: 200px;" title="<?php echo htmlspecialchars($payment['address']); ?>">
+                                            <?php echo htmlspecialchars($payment['address']); ?>
+                                        </span>
+                                    </div>
+                                    <!-- Hidden searchable text -->
+                                    <span class="d-none search-data">
+                                        <?php echo strtolower($payment['customer_name'] . ' ' . $payment['address'] . ' ' . date('d M Y', strtotime($payment['service_date']))); ?>
+                                    </span>
                                 </div>
+                                <?php endforeach; ?>
                             </div>
-                        </div>
+                            <div id="noIncomeMatch" class="text-center text-muted py-4 d-none">
+                                <i class="fas fa-search mb-2"></i><br>No matches found
+                            </div>
+                        <?php else: ?>
+                            <div class="text-center text-muted py-5">
+                                <i class="fas fa-wallet fa-2x mb-2 opacity-25"></i>
+                                <p class="small mb-0">No completed jobs yet.</p>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
             </div>
-            <?php endif; ?>
 
-            <div class="row">
-                <div class="col-lg-8">
-                    <div class="card mb-4">
-                        <div class="card-header bg-white py-3">
-                            <h5 class="mb-0 fw-bold"><i class="fas fa-info-circle text-warning me-2"></i>Personal & Contact Details</h5>
+            <!-- Main Content -->
+            <div class="col-lg-8">
+                <?php if($worker['doc_update_status'] == 'pending'): ?>
+                <div class="card mb-4 border-start border-4 border-warning bg-body-tertiary shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0 fw-bold text-warning"><i class="fas fa-clock me-2"></i>Pending Document Update Request</h5>
+                            <form method="POST" class="d-flex gap-2">
+                                <button type="submit" name="doc_action" value="approve" class="btn btn-success btn-sm rounded-pill px-3">Approve All</button>
+                                <button type="submit" name="doc_action" value="reject" class="btn btn-outline-danger btn-sm rounded-pill px-3">Reject All</button>
+                            </form>
                         </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-6 mb-4">
-                                    <label class="text-muted small fw-bold text-uppercase">Email Address</label>
-                                    <p class="mb-0 fs-5"><?php echo htmlspecialchars($worker['email']); ?></p>
+                        <div class="row g-3 text-center">
+                            <?php if($worker['pending_profile_image']): ?>
+                            <div class="col-md-6 col-lg-3">
+                                <div class="p-2 border rounded bg-body small">
+                                    <span class="d-block mb-1 fw-bold">New Photo</span>
+                                    <img src="<?php echo $worker['pending_profile_image']; ?>" class="rounded-circle mb-2" style="width: 50px; height: 50px; object-fit: cover;">
+                                    <a href="<?php echo $worker['pending_profile_image']; ?>" target="_blank" class="d-block tiny text-decoration-none">View Full</a>
                                 </div>
-                                <div class="col-md-6 mb-4">
-                                    <label class="text-muted small fw-bold text-uppercase">Phone Number</label>
-                                    <p class="mb-0 fs-5"><?php echo htmlspecialchars($worker['phone']); ?></p>
+                            </div>
+                            <?php endif; ?>
+                            <?php if($worker['pending_aadhar_photo']): ?>
+                            <div class="col-md-6 col-lg-3">
+                                <div class="p-2 border rounded bg-body small">
+                                    <span class="d-block mb-1 fw-bold">New Aadhar</span>
+                                    <i class="fas fa-id-card text-primary mb-2"></i><br>
+                                    <a href="<?php echo $worker['pending_aadhar_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
                                 </div>
-                                <div class="col-md-6 mb-4">
+                            </div>
+                            <?php endif; ?>
+                            <?php if($worker['pending_pan_photo']): ?>
+                            <div class="col-md-6 col-lg-3">
+                                <div class="p-2 border rounded bg-body small">
+                                    <span class="d-block mb-1 fw-bold">New PAN</span>
+                                    <i class="fas fa-id-card text-danger mb-2"></i><br>
+                                    <a href="<?php echo $worker['pending_pan_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                            <?php if($worker['pending_signature_photo']): ?>
+                            <div class="col-md-6 col-lg-3">
+                                <div class="p-2 border rounded bg-body small">
+                                    <span class="d-block mb-1 fw-bold">New Signature</span>
+                                    <i class="fas fa-file-signature text-secondary mb-2"></i><br>
+                                    <a href="<?php echo $worker['pending_signature_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <!-- General Information Section -->
+                <div class="card p-4 mb-4">
+                    <h5 class="fw-bold mb-4 text-primary"><i class="fas fa-info-circle me-2"></i>General Information</h5>
+                        <!-- General Info -->
+                    <div id="details">
+                            <div class="row g-4">
+                                <div class="col-md-6">
                                     <label class="text-muted small fw-bold text-uppercase">Aadhar Card Number</label>
-                                    <p class="mb-0 fs-5 fw-bold text-primary"><?php echo htmlspecialchars($worker['adhar_card']); ?></p>
+                                    <p class="fs-5 fw-bold text-primary"><?php echo htmlspecialchars($worker['adhar_card']); ?></p>
                                 </div>
-                                <div class="col-md-6 mb-4">
+                                <div class="col-md-6">
                                     <label class="text-muted small fw-bold text-uppercase">Hourly Rate</label>
-                                    <p class="mb-0 fs-5">₹<?php echo number_format($worker['hourly_rate'], 2); ?></p>
+                                    <p class="fs-5">₹<?php echo number_format($worker['hourly_rate'], 2); ?>/hr</p>
                                 </div>
-                                <div class="col-12 mb-4">
+                                <div class="col-12">
+                                    <label class="text-muted small fw-bold text-uppercase">Service PIN Codes</label>
+                                    <div class="mt-1">
+                                        <?php 
+                                            foreach(explode(',', $worker['pin_code']) as $pin) {
+                                                echo '<span class="badge bg-body-tertiary text-body border me-1 mb-1">' . trim($pin) . '</span>';
+                                            }
+                                        ?>
+                                    </div>
+                                </div>
+                                <div class="col-12">
                                     <label class="text-muted small fw-bold text-uppercase">Residential Address</label>
-                                    <p class="mb-0 fs-6"><?php echo nl2br(htmlspecialchars($worker['address'])); ?></p>
+                                    <p><?php echo nl2br(htmlspecialchars($worker['address'])); ?></p>
                                 </div>
                                 <div class="col-12">
                                     <label class="text-muted small fw-bold text-uppercase">Bio / Skills</label>
-                                    <p class="mb-0"><?php echo nl2br(htmlspecialchars($worker['bio'] ? $worker['bio'] : 'No bio provided.')); ?></p>
+                                    <p><?php echo nl2br(htmlspecialchars($worker['bio'] ?: 'No bio provided.')); ?></p>
                                 </div>
                             </div>
+                            
+                            <?php if ($worker['previous_work_images']): ?>
+                            <hr class="my-4">
+                            <label class="text-muted small fw-bold text-uppercase mb-3 d-block">Portfolio / Previous Work</label>
+                            <div class="row g-2">
+                                <?php foreach(explode(',', $worker['previous_work_images']) as $img_url): 
+                                    if (empty(trim($img_url))) continue;
+                                    $thumb = $cld->getUrl(trim($img_url), ['width' => 400, 'height' => 300, 'crop' => 'fill']);
+                                ?>
+                                    <div class="col-md-4 col-lg-3">
+                                        <a href="#" onclick="openLightbox('<?php echo trim($img_url); ?>'); return false;">
+                                            <img src="<?php echo $thumb; ?>" class="img-fluid rounded border shadow-sm w-100" style="height: 120px; object-fit: cover; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                                        </a>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
 
-                    <div class="card">
-                        <div class="card-header bg-white py-3">
-                            <h5 class="mb-0 fw-bold"><i class="fas fa-map-marked-alt text-warning me-2"></i>Service Areas & Location</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="mb-4">
-                                <label class="text-muted small fw-bold text-uppercase mb-2 d-block">Serving PIN Codes</label>
-                                <?php 
-                                    $pins = explode(',', $worker['pin_code']);
-                                    foreach($pins as $pin) {
-                                        echo '<span class="badge bg-light text-dark border p-2 me-2 mb-2">' . trim($pin) . '</span>';
-                                    }
-                                ?>
-                            </div>
-                            <div class="mb-4">
-                                <label class="text-muted small fw-bold text-uppercase mb-2 d-block">Preferred Working Area</label>
-                                <p><?php echo htmlspecialchars($worker['working_location'] ? $worker['working_location'] : 'Not specified'); ?></p>
-                            </div>
-
-                            <div class="mb-4">
-                                <label class="text-muted small fw-bold text-uppercase mb-3 d-block"><i class="fas fa-id-card me-2"></i>ID Verification Documents</label>
-                                <div class="row g-3">
-                                    <div class="col-md-6 text-center">
-                                        <div class="p-2 border rounded bg-light mb-2">
-                                            <p class="small fw-bold mb-2">Aadhar Card Photo</p>
-                                            <?php if($worker['aadhar_photo']): ?>
-                                                <?php $ext = strtolower(pathinfo($worker['aadhar_photo'], PATHINFO_EXTENSION)); ?>
-                                                <?php if($ext == 'pdf'): ?>
-                                                    <a href="../uploads/documents/<?php echo $worker['aadhar_photo']; ?>" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-file-pdf me-1"></i> View Aadhar PDF</a>
+                <!-- Documents Section -->
+                <div class="card p-4 mb-4">
+                    <h5 class="fw-bold mb-4 text-primary"><i class="fas fa-file-alt me-2"></i>Documents</h5>
+                    <div id="docs">
+                            <div class="row g-4">
+                                <div class="col-md-4">
+                                    <div class="p-3 border rounded text-center h-100 d-flex flex-column justify-content-between">
+                                        <div class="mb-3">
+                                            <small class="text-muted d-block">Aadhar Card</small>
+                                            <?php if ($worker['aadhar_photo']): ?>
+                                                <?php if (strtolower(pathinfo($worker['aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                    <a href="<?php echo $worker['aadhar_photo']; ?>" target="_blank" class="btn btn-sm btn-outline-danger w-100 mt-1"><i class="fas fa-file-pdf me-1"></i> View PDF</a>
                                                 <?php else: ?>
-                                                    <a href="../uploads/documents/<?php echo $worker['aadhar_photo']; ?>" target="_blank">
-                                                        <img src="../uploads/documents/<?php echo $worker['aadhar_photo']; ?>" class="img-fluid rounded shadow-sm border" style="max-height: 200px;" alt="Aadhar Card">
+                                                    <a href="#" onclick="openLightbox('<?php echo $worker['aadhar_photo']; ?>'); return false;">
+                                                        <img src="<?php echo $cld->getUrl($worker['aadhar_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
                                                     </a>
                                                 <?php endif; ?>
                                             <?php else: ?>
-                                                <span class="text-muted italic">Not uploaded</span>
+                                                <span class="text-muted small">Not provided</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>
-                                    <div class="col-md-6 text-center">
-                                        <div class="p-2 border rounded bg-light mb-2">
-                                            <p class="small fw-bold mb-2">PAN Card Photo</p>
-                                            <?php if($worker['pan_photo']): ?>
-                                                <?php $ext = strtolower(pathinfo($worker['pan_photo'], PATHINFO_EXTENSION)); ?>
-                                                <?php if($ext == 'pdf'): ?>
-                                                    <a href="../uploads/documents/<?php echo $worker['pan_photo']; ?>" target="_blank" class="btn btn-outline-dark btn-sm"><i class="fas fa-file-pdf me-1"></i> View PAN PDF</a>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="p-3 border rounded text-center h-100 d-flex flex-column justify-content-between">
+                                        <div class="mb-3">
+                                            <small class="text-muted d-block">PAN Card</small>
+                                            <?php if ($worker['pan_photo']): ?>
+                                                <?php if (strtolower(pathinfo($worker['pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                    <a href="<?php echo $worker['pan_photo']; ?>" target="_blank" class="btn btn-sm btn-outline-danger w-100 mt-1"><i class="fas fa-file-pdf me-1"></i> View PDF</a>
                                                 <?php else: ?>
-                                                    <a href="../uploads/documents/<?php echo $worker['pan_photo']; ?>" target="_blank">
-                                                        <img src="../uploads/documents/<?php echo $worker['pan_photo']; ?>" class="img-fluid rounded shadow-sm border" style="max-height: 200px;" alt="PAN Card">
+                                                    <a href="#" onclick="openLightbox('<?php echo $worker['pan_photo']; ?>'); return false;">
+                                                        <img src="<?php echo $cld->getUrl($worker['pan_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
                                                     </a>
                                                 <?php endif; ?>
                                             <?php else: ?>
-                                                <span class="text-muted italic">Not uploaded</span>
+                                                <span class="text-muted small">Not provided</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>
-
-                                    <div class="col-md-6 text-center">
-                                        <div class="p-2 border rounded bg-light mb-2">
-                                            <p class="small fw-bold mb-2">Signature Photo</p>
-                                            <?php if(isset($worker['signature_photo']) && $worker['signature_photo']): ?>
-                                                <a href="../uploads/documents/<?php echo $worker['signature_photo']; ?>" target="_blank">
-                                                    <img src="../uploads/documents/<?php echo $worker['signature_photo']; ?>" class="img-fluid rounded shadow-sm border" style="max-height: 150px;" alt="Signature">
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="p-3 border rounded text-center h-100 d-flex flex-column justify-content-between">
+                                        <div class="mb-3">
+                                            <small class="text-muted d-block">Signature</small>
+                                            <?php if ($worker['signature_photo']): ?>
+                                                <a href="#" onclick="openLightbox('<?php echo $worker['signature_photo']; ?>'); return false;">
+                                                    <img src="<?php echo $cld->getUrl($worker['signature_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
                                                 </a>
                                             <?php else: ?>
-                                                <span class="text-muted italic">Not uploaded</span>
+                                                <span class="text-muted small">Not provided</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-
-                            <?php if(isset($worker['previous_work_images']) && $worker['previous_work_images']): ?>
-                            <div class="mb-4">
-                                <label class="text-muted small fw-bold text-uppercase mb-3 d-block"><i class="fas fa-images me-2"></i>Previous Work Pictures</label>
-                                <div class="row g-2">
-                                    <?php 
-                                        $work_imgs = explode(',', $worker['previous_work_images']);
-                                        foreach($work_imgs as $img):
-                                            if(trim($img)):
-                                    ?>
-                                    <div class="col-md-4 col-sm-6">
-                                        <a href="../uploads/work_images/<?php echo trim($img); ?>" target="_blank">
-                                            <img src="../uploads/work_images/<?php echo trim($img); ?>" class="img-fluid rounded shadow-sm border w-100" style="height: 150px; object-fit: cover;" alt="Work Image">
-                                        </a>
-                                    </div>
-                                    <?php 
-                                            endif;
-                                        endforeach; 
-                                    ?>
-                                </div>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <?php if($worker['latitude'] && $worker['longitude']): ?>
-                            <div>
-                                <label class="text-muted small fw-bold text-uppercase mb-2 d-block">Last Shared GPS Location</label>
-                                <div class="alert alert-light border d-inline-block">
-                                    <i class="fas fa-location-arrow text-primary me-2"></i>
-                                    Lat: <?php echo $worker['latitude']; ?>, Lng: <?php echo $worker['longitude']; ?>
-                                    <a href="https://www.google.com/maps/search/?api=1&query=<?php echo $worker['latitude']; ?>,<?php echo $worker['longitude']; ?>" target="_blank" class="ms-3 btn btn-outline-primary btn-sm">
-                                        View on Google Maps
-                                    </a>
-                                </div>
-                            </div>
-                            <?php endif; ?>
-                        </div>
                     </div>
                 </div>
 
-                <div class="col-lg-4">
-                    <div class="card mb-4 text-center p-4" style="background: linear-gradient(135deg, #f1c40f 0%, #f39c12 100%); color: white;">
-                        <h5 class="mb-3 fw-bold">Performance Summary</h5>
-                        <div class="row mt-4">
-                            <div class="col-6 mb-3 border-end border-white border-opacity-25">
-                                <h3 class="fw-bold mb-0"><?php echo $stats['total']; ?></h3>
-                                <p class="small mb-0">Total Bookings</p>
-                            </div>
-                            <div class="col-6 mb-3">
-                                <h3 class="fw-bold mb-0"><?php echo $stats['completed']; ?></h3>
-                                <p class="small mb-0">Jobs Done</p>
-                            </div>
-                            <div class="col-12 mt-2 pt-3 border-top border-white border-opacity-25">
-                                <h2 class="fw-bold mb-0">₹<?php echo number_format($stats['total_earned'] ? $stats['total_earned'] : 0, 0); ?></h2>
-                                <p class="small mb-0">Total Earnings Shared</p>
+                <!-- Photo History Section -->
+                <div class="card p-4">
+                     <h5 class="fw-bold mb-4 text-primary"><i class="fas fa-history me-2"></i>Photo History</h5>
+                     <div id="history">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Previous Version</th>
+                                            <th>Archived On</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php 
+                                            $history_stmt = $pdo->prepare("SELECT * FROM worker_photo_history WHERE worker_id = ? ORDER BY replaced_at DESC");
+                                            $history_stmt->execute([$worker_id]);
+                                            $history = $history_stmt->fetchAll();
+                                            if ($history):
+                                                foreach($history as $h):
+                                        ?>
+                                        <tr>
+                                            <td><span class="badge bg-secondary text-uppercase"><?php echo $h['photo_type']; ?></span></td>
+                                            <td>
+                                                <a href="<?php echo $h['photo_path']; ?>" target="_blank" class="text-decoration-none">
+                                                    <?php if (strtolower(pathinfo($h['photo_path'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                        <i class="fas fa-file-pdf me-1"></i> PDF Document
+                                                    <?php else: ?>
+                                                        <img src="<?php echo $cld->getUrl($h['photo_path'], ['width' => 100, 'height' => 100, 'crop' => 'thumb']); ?>" class="rounded border shadow-sm" style="width: 50px; height: 50px; object-fit: cover;">
+                                                    <?php endif; ?>
+                                                </a>
+                                            </td>
+                                            <td><small class="text-muted"><?php echo date('M d, Y h:i A', strtotime($h['replaced_at'])); ?></small></td>
+                                        </tr>
+                                        <?php endforeach; else: ?>
+                                        <tr><td colspan="3" class="text-center text-muted py-4">No history available yet.</td></tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
-                    </div>
+                        </div>
+                     </div>
+                </div>
 
-                    <div class="card mb-4">
-                        <div class="card-header bg-white py-3">
-                            <h5 class="mb-0 fw-bold">Recent Bookings</h5>
-                        </div>
-                        <div class="card-body p-0">
-                            <div class="list-group list-group-flush">
-                                <?php
-                                $recent_bookings_stmt = $pdo->prepare("SELECT b.*, u.name as user_name FROM bookings b JOIN users u ON b.user_id = u.id WHERE b.worker_id = ? ORDER BY b.created_at DESC LIMIT 5");
-                                $recent_bookings_stmt->execute([$worker_id]);
-                                $recent = $recent_bookings_stmt->fetchAll();
-                                
-                                if($recent):
-                                    foreach($recent as $rb):
-                                ?>
-                                    <div class="list-group-item px-3">
-                                        <div class="d-flex justify-content-between align-items-center mb-1">
-                                            <span class="fw-bold"><?php echo htmlspecialchars($rb['user_name']); ?></span>
-                                            <span class="badge bg-<?php echo ($rb['status'] == 'completed' ? 'success' : ($rb['status'] == 'pending' ? 'warning' : 'danger')); ?> small" style="font-size: 0.7rem;">
-                                                <?php echo ucfirst($rb['status']); ?>
-                                            </span>
-                                        </div>
-                                        <div class="small text-muted">
-                                            <i class="far fa-calendar-alt me-1"></i> <?php echo date('M d, Y', strtotime($rb['service_date'])); ?>
-                                        </div>
-                                    </div>
-                                <?php 
-                                    endforeach;
-                                else:
-                                    echo '<div class="p-3 text-center text-muted">No bookings yet.</div>';
-                                endif;
-                                ?>
-                            </div>
-                        </div>
-                    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Set Active Link in Sidebar
+        document.querySelectorAll('.admin-sidebar a').forEach(link => {
+            if(link.getAttribute('href').includes('workers') || window.location.href.includes('view_worker')) {
+                // Approximate logic to highlight Dashboard or Workers
+            }
+        });
+
+        // Income Search Functionality
+        document.getElementById('incomeSearch')?.addEventListener('keyup', function() {
+            const filter = this.value.toLowerCase();
+            const items = document.querySelectorAll('.income-item');
+            let hasVisible = false;
+
+            items.forEach(item => {
+                const text = item.querySelector('.search-data').textContent;
+                if (text.includes(filter)) {
+                    item.classList.remove('d-none');
+                    hasVisible = true;
+                } else {
+                    item.classList.add('d-none');
+                }
+            });
+
+            const noMatch = document.getElementById('noIncomeMatch');
+            if (noMatch) {
+                noMatch.classList.toggle('d-none', hasVisible);
+            }
+        });
+    </script>
+    <!-- Image Lightbox Modal -->
+    <div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-transparent border-0 shadow-none">
+                <div class="modal-body p-0 text-center position-relative">
+                    <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-3 z-3" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <img id="lightboxImage" src="" class="img-fluid rounded-3 shadow-lg" style="max-height: 90vh;">
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
+    <script>
+        // Lightbox Function
+        function openLightbox(src) {
+            document.getElementById('lightboxImage').src = src;
+            var myModal = new bootstrap.Modal(document.getElementById('imageModal'));
+            myModal.show();
+        }
+
+        // Set Active Link in Sidebar
 </html>

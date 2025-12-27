@@ -1,6 +1,7 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
 
 // Check Worker Login
 if (!isset($_SESSION['worker_id'])) {
@@ -12,15 +13,72 @@ $worker_id = $_SESSION['worker_id'];
 $success = "";
 $error = "";
 
+// Handle OTP Generation for Profile Update (AJAX endpoint)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
+    require_once '../includes/mailer.php';
+    
+    $stmt = $pdo->prepare("SELECT email, name FROM workers WHERE id = ?");
+    $stmt->execute([$worker_id]);
+    $worker_data = $stmt->fetch();
+    
+    $otp = rand(100000, 999999);
+    $expiry = date("Y-m-d H:i:s", strtotime("+10 minutes"));
+    
+    $pdo->prepare("UPDATE workers SET otp = ?, otp_expires_at = ? WHERE id = ?")
+        ->execute([$otp, $expiry, $worker_id]);
+    
+    $mail_result = sendOTPEmail($worker_data['email'], $otp, $worker_data['name']);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'status' => $mail_result['status'] ? 'success' : 'error',
+        'message' => $mail_result['status'] ? 'OTP sent to ' . $worker_data['email'] : $mail_result['message']
+    ]);
+    exit;
+}
+
 // Handle Form Submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $name = trim($_POST['name']);
+    $email = trim($_POST['email']);
+    $new_password = $_POST['new_password'];
     $phone = trim($_POST['phone']);
     $hourly_rate = trim($_POST['hourly_rate']);
     $bio = trim($_POST['bio']);
     $address = trim($_POST['address']);
     $pin_codes_input = trim($_POST['pin_code']);
     $working_location = trim($_POST['working_location']);
+    $otp_entered = trim($_POST['profile_otp'] ?? '');
+
+    // Check if sensitive fields changed
+    $stmt = $pdo->prepare("SELECT email, password FROM workers WHERE id = ?");
+    $stmt->execute([$worker_id]);
+    $current_worker = $stmt->fetch();
+
+    $email_changed = ($email !== $current_worker['email']);
+    $password_changed = !empty($new_password);
+
+    if ($email_changed || $password_changed) {
+        // Verify OTP
+        $stmt_otp = $pdo->prepare("SELECT otp, otp_expires_at FROM workers WHERE id = ?");
+        $stmt_otp->execute([$worker_id]);
+        $otp_data = $stmt_otp->fetch();
+
+        if (empty($otp_entered) || $otp_data['otp'] !== $otp_entered || strtotime($otp_data['otp_expires_at']) < time()) {
+            $error = "Invalid or expired OTP. Please verify your identity to change email/password.";
+        } else {
+            // Clear OTP after successful verification
+            $pdo->prepare("UPDATE workers SET otp = NULL WHERE id = ?")->execute([$worker_id]);
+        }
+        
+        // Check email uniqueness if changed
+        if ($email_changed) {
+            $stmt_check = $pdo->prepare("SELECT id FROM workers WHERE email = ? AND id != ?");
+            $stmt_check->execute([$email, $worker_id]);
+            if ($stmt_check->fetch()) {
+                $error = "This email is already registered by another worker.";
+            }
+        }
+    }
     
     // Validate and process multiple PIN codes
     $pin_codes_array = array_map('trim', explode(',', $pin_codes_input));
@@ -33,112 +91,101 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $pin_code = implode(',', array_unique($valid_pin_codes));
 
     // Handle File Uploads (Required Admin Approval)
-    $pending_profile_image = null;
-    $pending_aadhar_photo = null;
-    $pending_pan_photo = null;
+    $pending_profile_image_url = null;
+    $pending_profile_image_public_id = null;
+    $pending_aadhar_photo_url = null;
+    $pending_aadhar_photo_public_id = null;
+    $pending_pan_photo_url = null;
+    $pending_pan_photo_public_id = null;
+    $pending_signature_photo_url = null;
+    $pending_signature_photo_public_id = null;
     $has_pending_docs = false;
     
-    $worker_upload_dir = '../uploads/workers/';
-    $doc_upload_dir = '../uploads/documents/';
-    
-    if (!is_dir($worker_upload_dir)) mkdir($worker_upload_dir, 0777, true);
-    if (!is_dir($doc_upload_dir)) mkdir($doc_upload_dir, 0777, true);
-
-    $allowed_img_ext = ['jpg', 'jpeg', 'png', 'gif'];
-    $allowed_doc_ext = ['jpg', 'jpeg', 'png', 'pdf'];
+    $cld = CloudinaryHelper::getInstance();
 
     // Profile Image
     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
-        if (in_array($ext, $allowed_img_ext)) {
-            $pending_profile_image = "pending_worker_" . $worker_id . "_" . time() . "." . $ext;
-            move_uploaded_file($_FILES['profile_image']['tmp_name'], $worker_upload_dir . $pending_profile_image);
+        $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
+        if ($upload) {
+            $pending_profile_image_url = $upload['url'];
+            $pending_profile_image_public_id = $upload['public_id'];
             $has_pending_docs = true;
-        } else {
-            $error = "Invalid Profile Image type.";
         }
     }
 
     // Aadhar Photo
     if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
-        $ext = strtolower(pathinfo($_FILES['aadhar_photo']['name'], PATHINFO_EXTENSION));
-        if (in_array($ext, $allowed_doc_ext)) {
-            $pending_aadhar_photo = "pending_aadhar_" . $worker_id . "_" . time() . "." . $ext;
-            move_uploaded_file($_FILES['aadhar_photo']['tmp_name'], $doc_upload_dir . $pending_aadhar_photo);
+        $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
+        if ($upload) {
+            $pending_aadhar_photo_url = $upload['url'];
+            $pending_aadhar_photo_public_id = $upload['public_id'];
             $has_pending_docs = true;
-        } else {
-            $error = "Invalid Aadhar Photo type.";
         }
     }
 
     // PAN Photo
     if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
-        $ext = strtolower(pathinfo($_FILES['pan_photo']['name'], PATHINFO_EXTENSION));
-        if (in_array($ext, $allowed_doc_ext)) {
-            $pending_pan_photo = "pending_pan_" . $worker_id . "_" . time() . "." . $ext;
-            move_uploaded_file($_FILES['pan_photo']['tmp_name'], $doc_upload_dir . $pending_pan_photo);
+        $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
+        if ($upload) {
+            $pending_pan_photo_url = $upload['url'];
+            $pending_pan_photo_public_id = $upload['public_id'];
             $has_pending_docs = true;
-        } else {
-            $error = "Invalid PAN Photo type.";
         }
     }
 
-    // Signature Photo (Direct Update)
-    $signature_photo = null;
+    // Signature Photo (Required Admin Approval)
     if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
-        $ext = strtolower(pathinfo($_FILES['signature_photo']['name'], PATHINFO_EXTENSION));
-        if (in_array($ext, $allowed_img_ext)) {
-            $signature_photo = "sig_" . $worker_id . "_" . time() . "." . $ext;
-            move_uploaded_file($_FILES['signature_photo']['tmp_name'], $doc_upload_dir . $signature_photo);
+        $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
+        if ($upload) {
+            $pending_signature_photo_url = $upload['url'];
+            $pending_signature_photo_public_id = $upload['public_id'];
+            $has_pending_docs = true;
         }
     }
 
-    // Previous Work Images (Append & Delete)
-    $work_upload_dir = '../uploads/work_images/';
-    if (!is_dir($work_upload_dir)) mkdir($work_upload_dir, 0777, true);
-
-    // 1. Fetch CURRENT images from DB first
-    $stmt_curr = $pdo->prepare("SELECT previous_work_images FROM workers WHERE id = ?");
+    // Previous Work Images (Append & Delete from Cloudinary)
+    $stmt_curr = $pdo->prepare("SELECT previous_work_images, previous_work_public_ids FROM workers WHERE id = ?");
     $stmt_curr->execute([$worker_id]);
     $curr_row = $stmt_curr->fetch();
-    $current_images_str = $curr_row['previous_work_images'] ?? '';
-    $current_images_array = array_filter(explode(',', $current_images_str)); // Array of existing images
+    $current_images_array = array_filter(explode(',', $curr_row['previous_work_images'] ?? ''));
+    $current_public_ids_array = array_filter(explode(',', $curr_row['previous_work_public_ids'] ?? ''));
 
     // 2. Handle Deletions
     if (isset($_POST['delete_images']) && is_array($_POST['delete_images'])) {
-        foreach ($_POST['delete_images'] as $del_img) {
-            // Remove from array
-            $key = array_search($del_img, $current_images_array);
+        foreach ($_POST['delete_images'] as $del_img_url) {
+            $key = array_search($del_img_url, $current_images_array);
             if ($key !== false) {
+                // Delete from Cloudinary
+                $cld->deleteImage($current_public_ids_array[$key]);
+                // Remove from arrays
                 unset($current_images_array[$key]);
-                // Optional: Delete file from server? 
-                // formatted_img_path = $work_upload_dir . $del_img;
-                // if(file_exists($formatted_img_path)) unlink($formatted_img_path);
+                unset($current_public_ids_array[$key]);
             }
         }
+        $current_images_array = array_values($current_images_array);
+        $current_public_ids_array = array_values($current_public_ids_array);
     }
 
     // 3. Handle New Uploads (Append)
-    $new_images_paths = [];
+    $new_images_urls = [];
+    $new_public_ids = [];
     if (isset($_FILES['previous_work_images'])) {
          $total_files = count($_FILES['previous_work_images']['name']);
          for ($i = 0; $i < $total_files; $i++) {
              if ($_FILES['previous_work_images']['error'][$i] == 0) {
-                 $ext = strtolower(pathinfo($_FILES['previous_work_images']['name'][$i], PATHINFO_EXTENSION));
-                 if (in_array($ext, $allowed_img_ext)) {
-                     $new_name = "work_" . $worker_id . "_" . time() . "_" . $i . "." . $ext;
-                     if (move_uploaded_file($_FILES['previous_work_images']['tmp_name'][$i], $work_upload_dir . $new_name)) {
-                         $new_images_paths[] = $new_name;
-                     }
+                 $upload = $cld->uploadImage($_FILES['previous_work_images']['tmp_name'][$i], CLD_FOLDER_WORKER_PREV_WORK, 'high-res');
+                 if ($upload) {
+                     $new_images_urls[] = $upload['url'];
+                     $new_public_ids[] = $upload['public_id'];
                  }
              }
          }
     }
 
-    // 4. Merge and Update
-    $final_images_array = array_merge($current_images_array, $new_images_paths);
-    $previous_work_images = implode(',', $final_images_array);
-
+    $final_images_array = array_merge($current_images_array, $new_images_urls);
+    $final_public_ids_array = array_merge($current_public_ids_array, $new_public_ids);
+    $previous_work_images_str = implode(',', $final_images_array);
+    $previous_work_public_ids_str = implode(',', $final_public_ids_array);
 
     if (!preg_match('/^\d{10}$/', $phone)) {
         $error = "Phone number must be exactly 10 digits.";
@@ -147,32 +194,40 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 
     if (!$error) {
-        // Prepare Query for Direct Updates (Basic Info)
-        $sql = "UPDATE workers SET name = ?, phone = ?, hourly_rate = ?, bio = ?, address = ?, pin_code = ?, working_location = ?";
-        $params = [$name, $phone, $hourly_rate, $bio, $address, $pin_code, $working_location];
+        // Prepare Query
+        $sql = "UPDATE workers SET name = ?, email = ?, phone = ?, hourly_rate = ?, bio = ?, address = ?, pin_code = ?, working_location = ?";
+        $params = [$name, $email, $phone, $hourly_rate, $bio, $address, $pin_code, $working_location];
 
-        if ($signature_photo) {
-            $sql .= ", signature_photo = ?";
-            $params[] = $signature_photo;
+        if ($password_changed) {
+            $sql .= ", password = ?";
+            $params[] = password_hash($new_password, PASSWORD_DEFAULT);
         }
-        if ($previous_work_images) {
-             $sql .= ", previous_work_images = ?";
-             $params[] = $previous_work_images;
-        }
+
+        $sql .= ", previous_work_images = ?, previous_work_public_ids = ?";
+        $params[] = $previous_work_images_str;
+        $params[] = $previous_work_public_ids_str;
 
         if ($has_pending_docs) {
             $sql .= ", doc_update_status = 'pending'";
-            if ($pending_profile_image) {
-                $sql .= ", pending_profile_image = ?";
-                $params[] = $pending_profile_image;
+            if ($pending_profile_image_url) {
+                $sql .= ", pending_profile_image = ?, pending_profile_image_public_id = ?";
+                $params[] = $pending_profile_image_url;
+                $params[] = $pending_profile_image_public_id;
             }
-            if ($pending_aadhar_photo) {
-                $sql .= ", pending_aadhar_photo = ?";
-                $params[] = $pending_aadhar_photo;
+            if ($pending_aadhar_photo_url) {
+                $sql .= ", pending_aadhar_photo = ?, pending_aadhar_photo_public_id = ?";
+                $params[] = $pending_aadhar_photo_url;
+                $params[] = $pending_aadhar_photo_public_id;
             }
-            if ($pending_pan_photo) {
-                $sql .= ", pending_pan_photo = ?";
-                $params[] = $pending_pan_photo;
+            if ($pending_pan_photo_url) {
+                $sql .= ", pending_pan_photo = ?, pending_pan_photo_public_id = ?";
+                $params[] = $pending_pan_photo_url;
+                $params[] = $pending_pan_photo_public_id;
+            }
+            if ($pending_signature_photo_url) {
+                $sql .= ", pending_signature_photo = ?, pending_signature_photo_public_id = ?";
+                $params[] = $pending_signature_photo_url;
+                $params[] = $pending_signature_photo_public_id;
             }
         }
 
@@ -181,11 +236,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         $stmt = $pdo->prepare($sql);
         if ($stmt->execute($params)) {
-             $success = "Profile basic info updated.";
-             if ($has_pending_docs) {
-                 $success .= " Your photo/document change requests have been sent for admin approval.";
-             }
-             $_SESSION['worker_name'] = $name;
+             $success = "Profile updated successfully! Critical changes will be live after admin approval.";
         } else {
             $error = "Failed to update database.";
         }
@@ -208,43 +259,40 @@ $worker = $stmt->fetch();
     <style>
         .profile-img-preview { width: 150px; height: 150px; object-fit: cover; border-radius: 50%; border: 3px solid var(--bs-border-color); }
         .card { border: none; border-radius: 20px; overflow: hidden; }
+        .card-header { border-bottom: none; }
     </style>
 </head>
 <body class="bg-body">
-    <?php include '../includes/worker_navbar.php'; ?>
+    <?php include '../includes/navbar.php'; ?>
 
     <div class="container py-5">
         <div class="row justify-content-center">
-            <div class="col-md-8">
+            <div class="col-md-10">
                 <div class="card shadow">
                     <div class="card-header bg-warning text-dark">
-                        <h4 class="mb-0">Edit Worker Profile</h4>
+                        <h4 class="mb-0">Edit Profile</h4>
                     </div>
                     <div class="card-body">
                         <?php if($error): ?>
-                            <div class="alert alert-danger px-4 py-3 rounded-3 shadow-sm mb-4"><i class="fas fa-exclamation-circle me-2"></i><?php echo $error; ?></div>
+                            <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
                         <?php if($success): ?>
-                            <div class="alert alert-success px-4 py-3 rounded-3 shadow-sm mb-4"><i class="fas fa-check-circle me-2"></i><?php echo $success; ?></div>
-                        <?php endif; ?>
-
-                        <?php if($worker['doc_update_status'] == 'pending'): ?>
-                            <div class="alert alert-info px-4 py-3 rounded-3 shadow-sm mb-4">
-                                <i class="fas fa-clock me-2"></i> <strong>Approval Pending:</strong> You have submitted some document/photo changes that are awaiting admin approval. 
-                                <br><small>You can still update other profile details below.</small>
-                            </div>
+                            <div class="alert alert-success"><?php echo $success; ?></div>
                         <?php endif; ?>
 
                         <form action="edit_profile.php" method="POST" enctype="multipart/form-data">
                             <div class="text-center mb-4">
                                 <?php 
                                     $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
-                                        ? "../uploads/workers/" . $worker['profile_image'] 
+                                        ? $worker['profile_image'] 
                                         : "https://via.placeholder.com/150"; 
                                 ?>
                                 <img src="<?php echo $img_src; ?>" alt="Profile" class="profile-img-preview mb-3">
                                 <div class="mb-3">
                                     <label for="profile_image" class="form-label">Change Profile Picture</label>
+                                    <?php if($worker['pending_profile_image']): ?>
+                                        <div class="mb-2"><span class="badge bg-info"><i class="fas fa-clock"></i> New Photo Pending Approval</span></div>
+                                    <?php endif; ?>
                                     <input type="file" class="form-control" id="profile_image" name="profile_image">
                                 </div>
                             </div>
@@ -257,6 +305,25 @@ $worker = $stmt->fetch();
                                 <div class="col-md-6 mb-3">
                                     <label for="phone" class="form-label">Phone Number</label>
                                     <input type="tel" class="form-control" id="phone" name="phone" value="<?php echo htmlspecialchars($worker['phone']); ?>" pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits">
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="email" class="form-label">Email Address <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <input type="email" class="form-control sensitive-field" id="email" name="email" value="<?php echo htmlspecialchars($worker['email']); ?>" required data-original="<?php echo htmlspecialchars($worker['email']); ?>">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="new_password" class="form-label">New Password <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control sensitive-field" id="new_password" name="new_password" placeholder="Leave blank to keep current">
+                                        <button class="btn btn-outline-secondary" type="button" id="togglePassword"><i class="fas fa-eye"></i></button>
+                                    </div>
+                                    <ul class="password-requirements mt-2 small" id="pass-reqs" style="display:none;">
+                                        <li id="req-length" class="text-muted"><i class="fas fa-circle"></i> 8+ chars</li>
+                                        <li id="req-upper" class="text-muted"><i class="fas fa-circle"></i> Uppercase</li>
+                                        <li id="req-special" class="text-muted"><i class="fas fa-circle"></i> Special</li>
+                                    </ul>
                                 </div>
                             </div>
 
@@ -283,14 +350,13 @@ $worker = $stmt->fetch();
                                         <?php if($worker['aadhar_photo']): ?>
                                             <div class="mb-2">
                                                 <small class="text-muted d-block mb-1">Current Aadhar:</small>
-                                                <?php if(strtolower(pathinfo($worker['aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                                    <span class="badge bg-secondary"><i class="fas fa-file-pdf"></i> PDF Uploaded</span>
-                                                <?php else: ?>
-                                                    <img src="../uploads/documents/<?php echo $worker['aadhar_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
-                                                <?php endif; ?>
+                                                <img src="<?php echo $worker['aadhar_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
                                             </div>
                                         <?php endif; ?>
-                                        <input type="file" class="form-control" name="aadhar_photo" accept=".jpg,.jpeg,.png,.pdf">
+                                        <input type="file" class="form-control" name="aadhar_photo" accept=".jpg,.jpeg,.png,.webp">
+                                        <?php if($worker['pending_aadhar_photo']): ?>
+                                            <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New Aadhar Pending Approval</div>
+                                        <?php endif; ?>
                                         <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
                                     </div>
                                 </div>
@@ -300,14 +366,13 @@ $worker = $stmt->fetch();
                                         <?php if($worker['pan_photo']): ?>
                                             <div class="mb-2">
                                                 <small class="text-muted d-block mb-1">Current PAN:</small>
-                                                <?php if(strtolower(pathinfo($worker['pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
-                                                    <span class="badge bg-secondary"><i class="fas fa-file-pdf"></i> PDF Uploaded</span>
-                                                <?php else: ?>
-                                                    <img src="../uploads/documents/<?php echo $worker['pan_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
-                                                <?php endif; ?>
+                                                <img src="<?php echo $worker['pan_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
                                             </div>
                                         <?php endif; ?>
-                                        <input type="file" class="form-control" name="pan_photo" accept=".jpg,.jpeg,.png,.pdf">
+                                        <input type="file" class="form-control" name="pan_photo" accept=".jpg,.jpeg,.png,.webp">
+                                        <?php if($worker['pending_pan_photo']): ?>
+                                            <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New PAN Pending Approval</div>
+                                        <?php endif; ?>
                                         <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
                                     </div>
                                 </div>
@@ -320,10 +385,14 @@ $worker = $stmt->fetch();
                                         <?php if(isset($worker['signature_photo']) && $worker['signature_photo']): ?>
                                             <div class="mb-2">
                                                 <small class="text-muted d-block mb-1">Current Signature:</small>
-                                                <img src="../uploads/documents/<?php echo $worker['signature_photo']; ?>" class="rounded shadow-sm border bg-white" style="max-height: 80px;">
+                                                <img src="<?php echo $worker['signature_photo']; ?>" class="rounded shadow-sm border bg-white" style="max-height: 80px;">
                                             </div>
                                         <?php endif; ?>
-                                        <input type="file" class="form-control" name="signature_photo" accept=".jpg,.jpeg,.png">
+                                        <input type="file" class="form-control" name="signature_photo" accept=".jpg,.jpeg,.png,.webp">
+                                        <?php if($worker['pending_signature_photo']): ?>
+                                            <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New Signature Pending Approval</div>
+                                        <?php endif; ?>
+                                        <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
                                     </div>
                                 </div>
                                 <div class="col-md-6 mb-4">
@@ -334,15 +403,15 @@ $worker = $stmt->fetch();
                                                 <small class="text-muted d-block mb-1">Current Images (Check to delete):</small>
                                                 <div class="d-flex gap-3 flex-wrap">
                                                     <?php 
-                                                        foreach(explode(',', $worker['previous_work_images']) as $img):
-                                                            if(trim($img)):
+                                                        foreach(explode(',', $worker['previous_work_images']) as $img_url):
+                                                            if(trim($img_url)):
                                                     ?>
                                                         <div class="position-relative text-center border rounded p-1" style="width: 80px;">
-                                                            <img src="../uploads/work_images/<?php echo trim($img); ?>" class="rounded shadow-sm mb-1" style="width: 100%; height: 60px; object-fit: cover;">
+                                                            <img src="<?php echo trim($img_url); ?>" class="rounded shadow-sm mb-1" style="width: 100%; height: 60px; object-fit: cover;">
                                                             <div class="form-check d-flex justify-content-center">
-                                                                <input class="form-check-input" type="checkbox" name="delete_images[]" value="<?php echo trim($img); ?>" id="del_<?php echo trim($img); ?>">
+                                                                <input class="form-check-input" type="checkbox" name="delete_images[]" value="<?php echo trim($img_url); ?>" id="del_<?php echo md5($img_url); ?>">
                                                             </div>
-                                                            <label class="form-check-label small text-danger" for="del_<?php echo trim($img); ?>" style="font-size: 0.7rem;">Delete</label>
+                                                            <label class="form-check-label small text-danger" for="del_<?php echo md5($img_url); ?>" style="font-size: 0.7rem;">Delete</label>
                                                         </div>
                                                     <?php 
                                                             endif;
@@ -351,13 +420,13 @@ $worker = $stmt->fetch();
                                                 </div>
                                             </div>
                                         <?php endif; ?>
-                                        <input type="file" class="form-control" name="previous_work_images[]" multiple accept=".jpg,.jpeg,.png">
-                                        <small class="text-muted mt-1 d-block">Uploading new images will replace existing ones.</small>
+                                        <input type="file" class="form-control" name="previous_work_images[]" multiple accept=".jpg,.jpeg,.png,.webp">
+                                        <small class="text-muted mt-1 d-block">Uploading new images will append to your portfolio.</small>
                                     </div>
                                 </div>
                             </div>
 
-                             <div class="mb-3">
+                            <div class="mb-3">
                                 <label for="address" class="form-label">Address</label>
                                 <input type="text" class="form-control" id="address" name="address" value="<?php echo htmlspecialchars($worker['address']); ?>">
                             </div>
@@ -382,9 +451,20 @@ $worker = $stmt->fetch();
                                 <small class="text-muted">Enter 6-digit PIN codes for areas you serve</small>
                                 <input type="hidden" name="pin_code" id="pin_code_hidden">
                             </div>
+                            </div>
+
+                            <div id="otpSection" class="mb-3 border p-3 rounded bg-light" style="display: none;">
+                                <label for="profile_otp" class="form-label fw-bold"><i class="fas fa-shield-alt me-2 text-warning"></i>Identity Verification</label>
+                                <p class="small text-muted mb-2">Changing email or password requires verification. An OTP will be sent to your current email.</p>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="profile_otp" name="profile_otp" placeholder="Enter 6-digit OTP">
+                                    <button class="btn btn-warning" type="button" id="sendOtpBtn">Send OTP</button>
+                                </div>
+                                <div id="otpStatus" class="mt-2 small"></div>
+                            </div>
 
                             <div class="d-grid gap-2">
-                                <button type="submit" class="btn btn-warning">Update Profile</button>
+                                <button type="submit" class="btn btn-warning btn-lg">Update Profile</button>
                                 <a href="dashboard.php" class="btn btn-secondary">Back to Dashboard</a>
                             </div>
                         </form>
@@ -397,8 +477,115 @@ $worker = $stmt->fetch();
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <script>
-        // Dynamic PIN Code Management
         document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const sensitiveFields = document.querySelectorAll('.sensitive-field');
+            const otpSection = document.getElementById('otpSection');
+            const sendOtpBtn = document.getElementById('sendOtpBtn');
+            const passInput = document.getElementById('new_password');
+            const passReqs = document.getElementById('pass-reqs');
+            
+            // Password toggle
+            const toggleBtn = document.getElementById('togglePassword');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', function() {
+                    const type = passInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                    passInput.setAttribute('type', type);
+                    this.querySelector('i').classList.toggle('fa-eye');
+                    this.querySelector('i').classList.toggle('fa-eye-slash');
+                });
+            }
+
+            // Detect changes
+            function checkChanges() {
+                let changed = false;
+                sensitiveFields.forEach(field => {
+                    if (field.id === 'email') {
+                        if (field.value !== field.dataset.original) changed = true;
+                    } else if (field.id === 'new_password') {
+                        if (field.value.length > 0) changed = true;
+                    }
+                });
+
+                if (changed) {
+                    otpSection.style.display = 'block';
+                    document.getElementById('profile_otp').required = true;
+                } else {
+                    otpSection.style.display = 'none';
+                    document.getElementById('profile_otp').required = false;
+                }
+            }
+
+            sensitiveFields.forEach(field => {
+                field.addEventListener('input', () => {
+                    checkChanges();
+                    if (field.id === 'new_password') {
+                        passReqs.style.display = field.value.length > 0 ? 'block' : 'none';
+                        updateRequirements(field.value);
+                    }
+                });
+            });
+
+            function updateRequirements(val) {
+                const reqs = [
+                    { id: 'req-length', valid: val.length >= 8 },
+                    { id: 'req-upper', valid: /[A-Z]/.test(val) },
+                    { id: 'req-special', valid: /[@$!%*?&]/.test(val) }
+                ];
+                reqs.forEach(req => {
+                    const el = document.getElementById(req.id);
+                    if (el) {
+                        el.className = req.valid ? 'text-success' : 'text-danger';
+                        el.querySelector('i').className = req.valid ? 'fas fa-check-circle' : 'fas fa-times-circle';
+                    }
+                });
+            }
+
+            // AJAX Send OTP
+            if (sendOtpBtn) {
+                sendOtpBtn.addEventListener('click', function() {
+                    sendOtpBtn.disabled = true;
+                    sendOtpBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending...';
+                    
+                    const formData = new FormData();
+                    formData.append('send_profile_otp', '1');
+                    
+                    fetch('edit_profile.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        const status = document.getElementById('otpStatus');
+                        status.className = 'mt-2 small ' + (data.status === 'success' ? 'text-success' : 'text-danger');
+                        status.innerText = data.message;
+                        
+                        if(data.status === 'success') {
+                            let timeLeft = 30;
+                            const timer = setInterval(() => {
+                                if(timeLeft <= 0) {
+                                    clearInterval(timer);
+                                    sendOtpBtn.disabled = false;
+                                    sendOtpBtn.innerText = 'Resend OTP';
+                                } else {
+                                    sendOtpBtn.innerText = `Wait ${timeLeft}s`;
+                                    timeLeft--;
+                                }
+                            }, 1000);
+                        } else {
+                            sendOtpBtn.disabled = false;
+                            sendOtpBtn.innerText = 'Retry Sending';
+                        }
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        sendOtpBtn.disabled = false;
+                        sendOtpBtn.innerText = 'Error - Retry';
+                    });
+                });
+            }
+
+            // PIN code handling
             const container = document.getElementById('pinCodeContainer');
             
             container.addEventListener('click', function(e) {
@@ -417,95 +604,16 @@ $worker = $stmt->fetch();
                 }
             });
 
-            // Before form submit, combine all PIN codes
             document.querySelector('form').addEventListener('submit', function(e) {
                 const pinInputs = document.querySelectorAll('.pin-code-input');
                 const pinCodes = [];
-                
                 pinInputs.forEach(input => {
                     const value = input.value.trim();
-                    if (value && /^\d{6}$/.test(value)) {
-                        pinCodes.push(value);
-                    }
+                    if (value && /^\d{6}$/.test(value)) pinCodes.push(value);
                 });
-                
                 document.getElementById('pin_code_hidden').value = pinCodes.join(',');
             });
         });
-    </script>
-    <?php include '../includes/worker_footer.php'; ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/laubour/assets/js/theme.js"></script>
-    <script>
-        // Real-time Validation Helper (reused)
-        function setupValidation(input, validateFn, errorMsg) {
-             if (!input) return;
- 
-             let errorDiv = input.parentNode.querySelector('.invalid-feedback-custom');
-             if (!errorDiv) {
-                 errorDiv = document.createElement('div');
-                 errorDiv.className = 'invalid-feedback invalid-feedback-custom';
-                 errorDiv.style.display = 'none';
-                 errorDiv.style.color = '#dc3545';
-                 errorDiv.style.fontSize = '0.875em';
-                 errorDiv.style.marginTop = '0.25rem';
-                 input.parentNode.appendChild(errorDiv);
-             }
- 
-             const validate = () => {
-                 const isValid = validateFn(input.value);
-                 // Only show error if not empty (let HTML5 required handle empty)
-                 if (!isValid && input.value !== '') {
-                     input.classList.add('is-invalid');
-                     errorDiv.innerText = errorMsg;
-                     errorDiv.style.display = 'block';
-                 } else {
-                     input.classList.remove('is-invalid');
-                     errorDiv.style.display = 'none';
-                 }
-             };
- 
-             input.addEventListener('input', validate);
-             input.addEventListener('blur', validate);
-         }
- 
-         document.addEventListener('DOMContentLoaded', function() {
-             // 1. Phone Validation
-             const phoneInput = document.getElementById('phone');
-             setupValidation(phoneInput, (val) => /^\d{10}$/.test(val), 'Phone number must be exactly 10 digits.');
-             if(phoneInput) {
-                 phoneInput.addEventListener('input', function() { this.value = this.value.replace(/\D/g, ''); });
-             }
- 
-             // 2. Hourly Rate Validation
-             const rateInput = document.getElementById('hourly_rate');
-             setupValidation(rateInput, (val) => parseFloat(val) >= 0, 'Hourly rate cannot be negative.');
- 
-             // 3. Pin Code Validation (Dynamic)
-             const container = document.getElementById('pinCodeContainer');
-             
-             const attachPinValidation = (input) => {
-                  setupValidation(input, (val) => /^\d{6}$/.test(val), 'Pin code must be 6 digits.');
-                  input.addEventListener('input', function() {
-                      this.value = this.value.replace(/\D/g, '');
-                  });
-             };
- 
-             container.querySelectorAll('.pin-code-input').forEach(attachPinValidation);
- 
-             const observer = new MutationObserver((mutations) => {
-                 mutations.forEach((mutation) => {
-                     mutation.addedNodes.forEach((node) => {
-                         if (node.nodeType === 1 && node.classList.contains('pin-code-group')) {
-                             const input = node.querySelector('.pin-code-input');
-                             if(input) attachPinValidation(input);
-                         }
-                     });
-                 });
-             });
- 
-             observer.observe(container, { childList: true });
-         });
     </script>
 </body>
 </html>

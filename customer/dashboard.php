@@ -1,6 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -101,8 +103,8 @@ $user = $user_stmt->fetch();
             <div class="mb-4 d-flex justify-content-center">
                 <?php 
                     $user_img = ($user['profile_image'] && $user['profile_image'] != 'default.png') 
-                        ? "/laubour/uploads/users/" . $user['profile_image'] 
-                        : "/laubour/assets/img/default-user.png";
+                        ? $cld->getUrl($user['profile_image'], ['width' => 200, 'height' => 200, 'crop' => 'fill', 'gravity' => 'face']) 
+                        : BASE_URL . "/assets/img/default-user.png";
                 ?>
                 <div class="position-relative">
                     <img src="<?php echo $user_img; ?>" alt="Profile" class="rounded-circle border border-4 border-white border-opacity-25 shadow-lg" style="width: 100px; height: 100px; object-fit: cover;">
@@ -114,7 +116,7 @@ $user = $user_stmt->fetch();
             <h1 class="fw-bold mb-2">Hello, <?php echo htmlspecialchars($user['name']); ?>!</h1>
             <p class="opacity-75 mb-4">What help do you need today?</p>
             <div class="d-flex justify-content-center gap-2">
-                <a href="../workers.php" class="btn btn-warning rounded-pill px-4 fw-bold">Book a Worker</a>
+                <a href="workers.php" class="btn btn-warning rounded-pill px-4 fw-bold">Book a Worker</a>
                 <a href="edit_profile.php" class="btn btn-outline-light rounded-pill px-4">Edit Profile</a>
             </div>
         </div>
@@ -180,7 +182,7 @@ $user = $user_stmt->fetch();
                     <i class="fas fa-chevron-right text-muted"></i>
                 </div>
 
-                <div class="feature-card bg-body-tertiary" onclick="location.href='../workers.php'">
+                <div class="feature-card bg-body-tertiary" onclick="location.href='workers.php'">
                     <div class="feature-icon bg-success bg-opacity-10 text-success">
                         <i class="fas fa-search-location"></i>
                     </div>
@@ -191,7 +193,7 @@ $user = $user_stmt->fetch();
                     <i class="fas fa-chevron-right text-muted"></i>
                 </div>
 
-                <div class="feature-card bg-body-tertiary" onclick="location.href='../services.php'">
+                <div class="feature-card bg-body-tertiary" onclick="location.href='services.php'">
                     <div class="feature-icon bg-info bg-opacity-10 text-info">
                         <i class="fas fa-th-large"></i>
                     </div>

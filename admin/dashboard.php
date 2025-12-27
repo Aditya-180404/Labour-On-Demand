@@ -1,7 +1,9 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Check Admin Login
 if (!isset($_SESSION['admin_logged_in'])) {
@@ -37,7 +39,7 @@ if (isset($_POST['action']) && isset($_POST['worker_id'])) {
                         <p>Hello <strong>{$worker['name']}</strong>,</p>
                         <p>Congratulations! Your worker profile has been approved by the admin.</p>
                         <p>You can now login to your account and start accepting bookings.</p>
-                        <a href='http://localhost/laubour/worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
+                        <a href='http://" . $_SERVER['HTTP_HOST'] . BASE_URL . "/worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -67,7 +69,7 @@ if (isset($_POST['doc_action']) && isset($_POST['worker_id'])) {
     
     if ($action === 'approve') {
         // Fetch pending docs
-        $stmt = $pdo->prepare("SELECT profile_image, aadhar_photo, pan_photo, pending_profile_image, pending_aadhar_photo, pending_pan_photo FROM workers WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT profile_image, profile_image_public_id, aadhar_photo, aadhar_photo_public_id, pan_photo, pan_photo_public_id, signature_photo, signature_photo_public_id, pending_profile_image, pending_profile_image_public_id, pending_aadhar_photo, pending_aadhar_photo_public_id, pending_pan_photo, pending_pan_photo_public_id, pending_signature_photo, pending_signature_photo_public_id FROM workers WHERE id = ?");
         $stmt->execute([$worker_id]);
         $w = $stmt->fetch();
         
@@ -76,24 +78,40 @@ if (isset($_POST['doc_action']) && isset($_POST['worker_id'])) {
             $params = [];
             
             if ($w['pending_profile_image']) {
-                $updates[] = "profile_image = ?";
-                $params[] = $w['pending_profile_image'];
+                if ($w['profile_image'] && $w['profile_image'] != 'default.png') {
+                    $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'profile', ?, ?)")->execute([$worker_id, $w['profile_image'], $w['profile_image_public_id']]);
+                }
+                $updates[] = "profile_image = ?"; $params[] = $w['pending_profile_image'];
+                $updates[] = "profile_image_public_id = ?"; $params[] = $w['pending_profile_image_public_id'];
             }
             if ($w['pending_aadhar_photo']) {
-                $updates[] = "aadhar_photo = ?";
-                $params[] = $w['pending_aadhar_photo'];
+                if ($w['aadhar_photo']) {
+                    $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'aadhar', ?, ?)")->execute([$worker_id, $w['aadhar_photo'], $w['aadhar_photo_public_id']]);
+                }
+                $updates[] = "aadhar_photo = ?"; $params[] = $w['pending_aadhar_photo'];
+                $updates[] = "aadhar_photo_public_id = ?"; $params[] = $w['pending_aadhar_photo_public_id'];
             }
             if ($w['pending_pan_photo']) {
-                $updates[] = "pan_photo = ?";
-                $params[] = $w['pending_pan_photo'];
+                if ($w['pan_photo']) {
+                    $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'pan', ?, ?)")->execute([$worker_id, $w['pan_photo'], $w['pan_photo_public_id']]);
+                }
+                $updates[] = "pan_photo = ?"; $params[] = $w['pending_pan_photo'];
+                $updates[] = "pan_photo_public_id = ?"; $params[] = $w['pending_pan_photo_public_id'];
+            }
+            if ($w['pending_signature_photo']) {
+                if ($w['signature_photo']) {
+                    $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'signature', ?, ?)")->execute([$worker_id, $w['signature_photo'], $w['signature_photo_public_id']]);
+                }
+                $updates[] = "signature_photo = ?"; $params[] = $w['pending_signature_photo'];
+                $updates[] = "signature_photo_public_id = ?"; $params[] = $w['pending_signature_photo_public_id'];
             }
             
             if (!empty($updates)) {
-                $query = "UPDATE workers SET " . implode(', ', $updates) . ", pending_profile_image = NULL, pending_aadhar_photo = NULL, pending_pan_photo = NULL, doc_update_status = 'approved' WHERE id = ?";
+                $query = "UPDATE workers SET " . implode(', ', $updates) . ", pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'approved' WHERE id = ?";
                 $params[] = $worker_id;
                 $stmt = $pdo->prepare($query);
                 if ($stmt->execute($params)) {
-                    $success_msg = "Worker documents updated and approved.";
+                    $success_msg = "Worker documents updated and approved. Old photos moved to history.";
                 } else {
                     $error_msg = "Failed to update documents.";
                 }
@@ -101,7 +119,7 @@ if (isset($_POST['doc_action']) && isset($_POST['worker_id'])) {
         }
     } else {
         // Reject update - clear pending docs
-        $stmt = $pdo->prepare("UPDATE workers SET pending_profile_image = NULL, pending_aadhar_photo = NULL, pending_pan_photo = NULL, doc_update_status = 'rejected' WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE workers SET pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'rejected' WHERE id = ?");
         if ($stmt->execute([$worker_id])) {
             $success_msg = "Document update request rejected.";
         } else {
@@ -109,6 +127,14 @@ if (isset($_POST['doc_action']) && isset($_POST['worker_id'])) {
         }
     }
 }
+
+// Search Logic
+$worker_q = $_GET['worker_q'] ?? '';
+$user_q = $_GET['user_q'] ?? '';
+$feedback_q = $_GET['feedback_q'] ?? '';
+$booking_q = $_GET['booking_q'] ?? '';
+$booking_status = $_GET['booking_status'] ?? '';
+$history_q = $_GET['history_q'] ?? '';
 
 // Fetch Pending Workers
 $pending_stmt = $pdo->query("SELECT w.*, c.name as category_name FROM workers w LEFT JOIN categories c ON w.service_category_id = c.id WHERE w.status = 'pending'");
@@ -118,24 +144,62 @@ $pending_workers = $pending_stmt->fetchAll();
 $doc_updates_stmt = $pdo->query("SELECT w.*, c.name as category_name FROM workers w LEFT JOIN categories c ON w.service_category_id = c.id WHERE w.doc_update_status = 'pending'");
 $doc_updates = $doc_updates_stmt->fetchAll();
 
-// Fetch All Workers
-$all_workers_stmt = $pdo->query("SELECT * FROM workers ORDER BY created_at DESC");
+// Fetch All Workers with Search
+if (!empty($worker_q)) {
+    $all_workers_stmt = $pdo->prepare("SELECT * FROM workers WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY created_at DESC");
+    $all_workers_stmt->execute(["%$worker_q%", "%$worker_q%", "%$worker_q%"]);
+} else {
+    $all_workers_stmt = $pdo->query("SELECT * FROM workers ORDER BY created_at DESC");
+}
 $all_workers = $all_workers_stmt->fetchAll();
 
-// Fetch All Users
-$users_stmt = $pdo->query("SELECT * FROM users ORDER BY created_at DESC");
+// Fetch All Users with Search
+if (!empty($user_q)) {
+    $users_stmt = $pdo->prepare("SELECT * FROM users WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY created_at DESC");
+    $users_stmt->execute(["%$user_q%", "%$user_q%", "%$user_q%"]);
+} else {
+    $users_stmt = $pdo->query("SELECT * FROM users ORDER BY created_at DESC");
+}
 $users = $users_stmt->fetchAll();
 
-// Fetch All Bookings
-$bookings_stmt = $pdo->query("SELECT b.*, u.name as user_name, u.pin_code as user_pin, w.name as worker_name 
-                              FROM bookings b 
-                              JOIN users u ON b.user_id = u.id 
-                              JOIN workers w ON b.worker_id = w.id 
-                              ORDER BY b.created_at DESC");
+// Fetch All Bookings with search & filter
+$booking_sql = "SELECT b.*, u.name as user_name, u.pin_code as user_pin, w.name as worker_name 
+                FROM bookings b 
+                JOIN users u ON b.user_id = u.id 
+                JOIN workers w ON b.worker_id = w.id WHERE 1=1";
+$booking_params = [];
+
+if (!empty($booking_q)) {
+    $booking_sql .= " AND (u.name LIKE ? OR w.name LIKE ? OR b.address LIKE ? OR b.service_date LIKE ?)";
+    $booking_params = array_merge($booking_params, ["%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%"]);
+}
+
+if (!empty($booking_status)) {
+    $booking_sql .= " AND b.status = ?";
+    $booking_params[] = $booking_status;
+}
+
+$booking_sql .= " ORDER BY b.created_at DESC";
+$bookings_stmt = $pdo->prepare($booking_sql);
+$bookings_stmt->execute($booking_params);
 $bookings = $bookings_stmt->fetchAll();
 
-// Fetch Feedbacks
-$feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
+// Fetch Document History with search
+if (!empty($history_q)) {
+    $history_stmt = $pdo->prepare("SELECT h.*, w.name as worker_name FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id WHERE w.name LIKE ? OR h.photo_type LIKE ? ORDER BY h.replaced_at DESC");
+    $history_stmt->execute(["%$history_q%", "%$history_q%"]);
+} else {
+    $history_stmt = $pdo->query("SELECT h.*, w.name as worker_name FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id ORDER BY h.replaced_at DESC");
+}
+$doc_history = $history_stmt->fetchAll();
+
+// Fetch Feedbacks with Search
+if (!empty($feedback_q)) {
+    $feedbacks_stmt = $pdo->prepare("SELECT * FROM feedbacks WHERE name LIKE ? OR email LIKE ? OR subject LIKE ? OR message LIKE ? ORDER BY created_at DESC");
+    $feedbacks_stmt->execute(["%$feedback_q%", "%$feedback_q%", "%$feedback_q%", "%$feedback_q%"]);
+} else {
+    $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
+}
 $feedbacks = $feedbacks_stmt->fetchAll();
 
 // Helper function to render feedback rows
@@ -174,6 +238,15 @@ function renderFeedbackTable($feedbacks, $showRole = true, $context = 'default')
                     <div class="text-wrap" style="max-width: 250px;">
                         <span class="badge bg-light text-dark border mb-1"><?php echo htmlspecialchars($fb['subject']); ?></span><br>
                         <small class="text-muted"><?php echo htmlspecialchars($fb['message']); ?></small>
+                        <?php if($fb['admin_reply']): ?>
+                            <div class="mt-2 p-2 bg-light rounded border-start border-primary border-4">
+                                <small class="fw-bold d-block text-primary"><i class="fas fa-reply me-1"></i> Admin Reply:</small>
+                                <small class="text-dark"><?php echo htmlspecialchars($fb['admin_reply']); ?></small>
+                                <div class="text-end mt-1">
+                                    <small class="text-muted" style="font-size: 0.7rem;"><?php echo date('M d, H:i', strtotime($fb['replied_at'])); ?></small>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </td>
                 <td>
@@ -263,11 +336,11 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
 
     if ($email_result['status']) {
         // Update DB
-        $stmt = $pdo->prepare("UPDATE feedbacks SET status = 'replied' WHERE id = ?");
-        if ($stmt->execute([$fid])) {
-            $success_msg = "Reply sent successfully to $to_email.";
+        $stmt = $pdo->prepare("UPDATE feedbacks SET status = 'replied', admin_reply = ?, replied_at = NOW() WHERE id = ?");
+        if ($stmt->execute([$reply_message, $fid])) {
+            $success_msg = "Reply sent successfully to $to_email and stored securely.";
         } else {
-            $error_msg = "Email sent, but failed to update status in database.";
+            $error_msg = "Email sent, but failed to update storage in database.";
         }
     } else {
         $error_msg = "Failed to send email: " . $email_result['message'];
@@ -429,6 +502,9 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                 <li class="nav-item">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#feedback-tab" type="button">Feedback <?php if(count(array_filter($feedbacks, fn($f) => $f['status'] == 'pending')) > 0): ?><span class="badge bg-warning text-dark rounded-pill"><?php echo count(array_filter($feedbacks, fn($f) => $f['status'] == 'pending')); ?></span><?php endif; ?></button>
                 </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-tab" type="button">Document History</button>
+                </li>
             </ul>
 
             <div class="tab-content">
@@ -471,8 +547,8 @@ $bookings = $bookings_stmt->fetchAll();
                                                                 <div class="col-auto">
                                                                     <div class="p-2 border rounded text-center" style="width: 120px;">
                                                                         <small class="d-block mb-1 text-primary">New Profile</small>
-                                                                        <img src="../uploads/workers/<?php echo $du['pending_profile_image']; ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
-                                                                        <a href="../uploads/workers/<?php echo $du['pending_profile_image']; ?>" target="_blank" class="d-block small text-decoration-none">Full App</a>
+                                                                        <img src="<?php echo $cld->getUrl($du['pending_profile_image'], ['width' => 120, 'height' => 120, 'crop' => 'fill']); ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
+                                                                        <a href="<?php echo $du['pending_profile_image']; ?>" target="_blank" class="d-block small text-decoration-none">Full App</a>
                                                                     </div>
                                                                 </div>
                                                             <?php endif; ?>
@@ -483,9 +559,9 @@ $bookings = $bookings_stmt->fetchAll();
                                                                         <?php if(strtolower(pathinfo($du['pending_aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
                                                                             <div class="mb-1"><i class="fas fa-file-pdf fa-2x text-danger"></i></div>
                                                                         <?php else: ?>
-                                                                            <img src="../uploads/documents/<?php echo $du['pending_aadhar_photo']; ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
+                                                                            <img src="<?php echo $cld->getUrl($du['pending_aadhar_photo'], ['width' => 120, 'height' => 120, 'crop' => 'fill']); ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
                                                                         <?php endif; ?>
-                                                                        <a href="../uploads/documents/<?php echo $du['pending_aadhar_photo']; ?>" target="_blank" class="d-block small text-decoration-none">View Doc</a>
+                                                                        <a href="<?php echo $du['pending_aadhar_photo']; ?>" target="_blank" class="d-block small text-decoration-none">View Doc</a>
                                                                     </div>
                                                                 </div>
                                                             <?php endif; ?>
@@ -496,9 +572,9 @@ $bookings = $bookings_stmt->fetchAll();
                                                                         <?php if(strtolower(pathinfo($du['pending_pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
                                                                             <div class="mb-1"><i class="fas fa-file-pdf fa-2x text-danger"></i></div>
                                                                         <?php else: ?>
-                                                                            <img src="../uploads/documents/<?php echo $du['pending_pan_photo']; ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
+                                                                            <img src="<?php echo $cld->getUrl($du['pending_pan_photo'], ['width' => 120, 'height' => 120, 'crop' => 'fill']); ?>" class="rounded shadow-sm mb-1" style="height: 60px; width: 60px; object-fit: cover;">
                                                                         <?php endif; ?>
-                                                                        <a href="../uploads/documents/<?php echo $du['pending_pan_photo']; ?>" target="_blank" class="d-block small text-decoration-none">View Doc</a>
+                                                                        <a href="<?php echo $du['pending_pan_photo']; ?>" target="_blank" class="d-block small text-decoration-none">View Doc</a>
                                                                     </div>
                                                                 </div>
                                                             <?php endif; ?>
@@ -524,6 +600,24 @@ $bookings = $bookings_stmt->fetchAll();
                 <!-- Workers Tab -->
                 <div class="tab-pane fade" id="workers-tab">
                     <div class="card shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <form method="GET" class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <h5 class="mb-0 text-primary fw-bold">All Workers</h5>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" name="worker_q" class="form-control rounded-start-pill" placeholder="Search by name, email, phone..." value="<?php echo htmlspecialchars($worker_q); ?>">
+                                        <button class="btn btn-primary rounded-end-pill px-3" type="submit"><i class="fas fa-search"></i></button>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <?php if(!empty($worker_q)): ?>
+                                        <a href="dashboard.php" class="btn btn-link btn-sm text-decoration-none">Clear</a>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </div>
                         <div class="card-body p-0">
                              <div class="table-responsive">
                                 <table class="table table-striped mb-0">
@@ -596,6 +690,24 @@ $bookings = $bookings_stmt->fetchAll();
                 <!-- Users Tab -->
                 <div class="tab-pane fade" id="users-tab">
                     <div class="card shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <form method="GET" class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <h5 class="mb-0 text-primary fw-bold">Registered Customers</h5>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" name="user_q" class="form-control rounded-start-pill" placeholder="Search by name, email, phone..." value="<?php echo htmlspecialchars($user_q); ?>">
+                                        <button class="btn btn-primary rounded-end-pill px-3" type="submit"><i class="fas fa-search"></i></button>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <?php if(!empty($user_q)): ?>
+                                        <a href="dashboard.php" class="btn btn-link btn-sm text-decoration-none">Clear</a>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </div>
                          <div class="card-body p-0">
                             <div class="table-responsive">
                                 <table class="table table-striped mb-0">
@@ -636,6 +748,34 @@ $bookings = $bookings_stmt->fetchAll();
                 <!-- Bookings Tab -->
                 <div class="tab-pane fade" id="bookings-tab">
                     <div class="card shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <form method="GET" class="row g-2 align-items-center">
+                                <div class="col-md-3">
+                                    <h5 class="mb-0 text-primary fw-bold">All Bookings</h5>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" name="booking_q" class="form-control rounded-start-pill" placeholder="User, Worker, Date, Location..." value="<?php echo htmlspecialchars($booking_q); ?>">
+                                        <button class="btn btn-primary rounded-end-pill px-3" type="submit"><i class="fas fa-search"></i></button>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <select name="booking_status" class="form-select form-select-sm rounded-pill" onchange="this.form.submit()">
+                                        <option value="">All Statuses</option>
+                                        <option value="pending" <?php echo $booking_status == 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                        <option value="accepted" <?php echo $booking_status == 'accepted' ? 'selected' : ''; ?>>Accepted</option>
+                                        <option value="completed" <?php echo $booking_status == 'completed' ? 'selected' : ''; ?>>Completed</option>
+                                        <option value="rejected" <?php echo $booking_status == 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                                        <option value="cancelled" <?php echo $booking_status == 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <?php if(!empty($booking_q) || !empty($booking_status)): ?>
+                                        <a href="dashboard.php" class="btn btn-link btn-sm text-decoration-none">Clear</a>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </div>
                          <div class="card-body p-0">
                             <div class="table-responsive">
                                 <table class="table table-striped mb-0">
@@ -694,6 +834,40 @@ $bookings = $bookings_stmt->fetchAll();
                                                         <?php if($b['completion_time']): ?>
                                                             <br><small class="text-muted" style="font-size: 0.7em;">Ended: <?php echo date('h:i A', strtotime($b['completion_time'])); ?></small>
                                                         <?php endif; ?>
+                                                        
+                                                        <?php if(!empty($b['work_proof_images'])): ?>
+                                                            <br>
+                                                            <button type="button" class="btn btn-sm btn-outline-info rounded-pill py-0 px-2 mt-1" style="font-size: 0.75em;" data-bs-toggle="modal" data-bs-target="#proofModal<?php echo $b['id']; ?>">
+                                                                <i class="fas fa-images me-1"></i>View Proof
+                                                            </button>
+                                                            
+                                                            <!-- Proof Modal -->
+                                                            <div class="modal fade" id="proofModal<?php echo $b['id']; ?>" tabindex="-1">
+                                                                <div class="modal-dialog modal-lg modal-dialog-centered">
+                                                                    <div class="modal-content">
+                                                                        <div class="modal-header">
+                                                                            <h5 class="modal-title">Work Proof - Booking #<?php echo $b['id']; ?></h5>
+                                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                                        </div>
+                                                                        <div class="modal-body">
+                                                                            <div class="row g-2">
+                                                                                <?php 
+                                                                                    $images = explode(',', $b['work_proof_images']);
+                                                                                    foreach($images as $img): 
+                                                                                ?>
+                                                                                    <div class="col-md-4 col-6">
+                                                                                        <a href="<?php echo trim($img); ?>" target="_blank">
+                                                                                            <img src="<?php echo trim($img); ?>" class="img-fluid rounded border shadow-sm w-100" style="height: 150px; object-fit: cover;">
+                                                                                        </a>
+                                                                                    </div>
+                                                                                <?php endforeach; ?>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        <?php endif; ?>
+
                                                     <?php endif; ?>
                                                 </td>
                                                 <td>
@@ -714,19 +888,34 @@ $bookings = $bookings_stmt->fetchAll();
                 <!-- Feedback Tab -->
                 <div class="tab-pane fade" id="feedback-tab">
                     <div class="card shadow-sm border-0 rounded-3">
-                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0 text-primary fw-bold">User Feedback</h5>
-                            <ul class="nav nav-pills small" id="feedbackSubTabs" role="tablist">
-                                <li class="nav-item">
-                                    <button class="nav-link active py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-all" type="button">All (<?php echo count($feedbacks); ?>)</button>
-                                </li>
-                                <li class="nav-item ms-2">
-                                    <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-users" type="button">Customers & Guests (<?php echo count(array_filter($feedbacks, fn($f) => in_array($f['sender_role'], ['user', 'guest']))); ?>)</button>
-                                </li>
-                                <li class="nav-item ms-2">
-                                    <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-workers" type="button">Workers (<?php echo count(array_filter($feedbacks, fn($f) => $f['sender_role'] == 'worker')); ?>)</button>
-                                </li>
-                            </ul>
+                        <div class="card-header bg-white py-3">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <h5 class="mb-0 text-primary fw-bold">User Feedback</h5>
+                                </div>
+                                <div class="col-md-4">
+                                    <form method="GET" class="input-group input-group-sm">
+                                        <input type="text" name="feedback_q" class="form-control rounded-start-pill" placeholder="Search name, msg, subject..." value="<?php echo htmlspecialchars($feedback_q); ?>">
+                                        <button class="btn btn-primary rounded-end-pill px-3" type="submit"><i class="fas fa-search"></i></button>
+                                        <?php if(!empty($feedback_q)): ?>
+                                            <a href="dashboard.php" class="btn btn-outline-secondary ms-2 rounded-pill px-2" title="Clear"><i class="fas fa-times"></i></a>
+                                        <?php endif; ?>
+                                    </form>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <ul class="nav nav-pills small d-inline-flex" id="feedbackSubTabs" role="tablist">
+                                        <li class="nav-item">
+                                            <button class="nav-link active py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-all" type="button">All (<?php echo count($feedbacks); ?>)</button>
+                                        </li>
+                                        <li class="nav-item ms-2">
+                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-users" type="button">Guests (<?php echo count(array_filter($feedbacks, fn($f) => in_array($f['sender_role'], ['user', 'guest']))); ?>)</button>
+                                        </li>
+                                        <li class="nav-item ms-2">
+                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-workers" type="button">Workers (<?php echo count(array_filter($feedbacks, fn($f) => $f['sender_role'] == 'worker')); ?>)</button>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
                         </div>
                         <div class="card-body p-0">
                             <div class="tab-content">
@@ -795,8 +984,93 @@ $bookings = $bookings_stmt->fetchAll();
                             </div>
                         </div>
                     </div>
-                </div>
                 </div> <!-- End Feedback Tab -->
+
+                <!-- Document History Tab -->
+                <div class="tab-pane fade" id="history-tab">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <form method="GET" class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <h5 class="mb-0 text-primary fw-bold">Global Document Update History</h5>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" name="history_q" class="form-control rounded-start-pill" placeholder="Search by name or document type..." value="<?php echo htmlspecialchars($history_q); ?>">
+                                        <button class="btn btn-primary rounded-end-pill px-3" type="submit"><i class="fas fa-search"></i></button>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 text-end">
+                                    <?php if(!empty($history_q)): ?>
+                                        <a href="dashboard.php" class="btn btn-link btn-sm text-decoration-none">Clear</a>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-striped mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Worker</th>
+                                            <th>Doc Type</th>
+                                            <th>Archived Preview</th>
+                                            <th>Action Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if(count($doc_history) > 0): ?>
+                                            <?php foreach($doc_history as $h): ?>
+                                                <tr>
+                                                    <td>
+                                                        <small class="text-muted d-block"><?php echo date('M d, Y', strtotime($h['replaced_at'])); ?></small>
+                                                        <small class="text-muted" style="font-size: 0.75rem;"><?php echo date('h:i A', strtotime($h['replaced_at'])); ?></small>
+                                                    </td>
+                                                    <td>
+                                                        <a href="view_worker.php?id=<?php echo $h['worker_id']; ?>" class="text-decoration-none fw-bold">
+                                                            <?php echo htmlspecialchars($h['worker_name']); ?>
+                                                        </a>
+                                                    </td>
+                                                    <td>
+                                                        <span class="badge bg-info text-dark">
+                                                            <?php echo strtoupper($h['photo_type']); ?>
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <?php if(strtolower(pathinfo($h['photo_path'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                            <a href="<?php echo $h['photo_path']; ?>" target="_blank" class="btn btn-sm btn-outline-danger">
+                                                                <i class="fas fa-file-pdf me-1"></i>View PDF
+                                                            </a>
+                                                        <?php else: ?>
+                                                            <div class="d-flex align-items-center gap-2">
+                                                                <?php 
+                                                                    // Use public_id for optimized preview if available
+                                                                    $preview_url = !empty($h['photo_public_id']) 
+                                                                        ? $cld->getUrl($h['photo_public_id'], ['width' => 100, 'height' => 100, 'crop' => 'thumb']) 
+                                                                        : $h['photo_path'];
+                                                                ?>
+                                                                <img src="<?php echo $preview_url; ?>" class="rounded border shadow-sm" style="height: 40px; width: 40px; object-fit: cover;">
+                                                                <a href="<?php echo $h['photo_path']; ?>" target="_blank" class="small text-decoration-none">Full View</a>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td>
+                                                        <span class="badge bg-secondary rounded-pill">Replaced</span>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center py-4 text-muted">No historical document updates found.</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div> <!-- End Document History Tab -->
             </div> <!-- End Tab Content -->
         </div> <!-- End container-fluid -->
     </div> <!-- End main-content -->
@@ -825,5 +1099,6 @@ $bookings = $bookings_stmt->fetchAll();
             }
         });
     </script>
+    <?php include '../includes/lightbox.php'; ?>
 </body>
 </html>

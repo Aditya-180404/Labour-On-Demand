@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 
 // Check if user is logged in
@@ -103,7 +103,7 @@ $history_bookings = $history_stmt->fetchAll();
                 <h3><i class="fas fa-calendar-check me-2 text-primary"></i>My Bookings</h3>
                 <p class="text-muted mb-0">Track and manage your service appointments</p>
             </div>
-            <a href="../workers.php" class="btn btn-primary rounded-pill"><i class="fas fa-plus me-2"></i>New Booking</a>
+            <a href="workers.php" class="btn btn-primary rounded-pill"><i class="fas fa-plus me-2"></i>New Booking</a>
         </div>
     </div>
 
@@ -157,7 +157,7 @@ $history_bookings = $history_stmt->fetchAll();
                         <div class="card-body text-center py-5">
                             <i class="fas fa-calendar-times fa-3x text-muted mb-3"></i>
                             <p class="text-muted">No active bookings found.</p>
-                            <a href="../workers.php" class="btn btn-outline-primary rounded-pill">Find Workers Now</a>
+                            <a href="workers.php" class="btn btn-outline-primary rounded-pill">Find Workers Now</a>
                         </div>
                     </div>
                 <?php endif; ?>
@@ -188,6 +188,15 @@ $history_bookings = $history_stmt->fetchAll();
                                     </div>
                                     <?php if($booking['status'] == 'completed'): ?>
                                         <div class="mt-2 text-end">
+                                            <?php if($booking['work_proof_images']): ?>
+                                                <div class="d-flex gap-1 justify-content-end mb-2">
+                                                    <?php foreach(explode(',', $booking['work_proof_images']) as $proof): ?>
+                                                        <a href="<?php echo trim($proof); ?>" target="_blank">
+                                                            <img src="<?php echo trim($proof); ?>" class="rounded border" style="width: 40px; height: 40px; object-fit: cover;" alt="Proof">
+                                                        </a>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php endif; ?>
                                             <?php if($booking['review_id']): ?>
                                                 <span class="badge bg-light text-success border"><i class="fas fa-check-circle me-1"></i>Rated</span>
                                             <?php else: ?>

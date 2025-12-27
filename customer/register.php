@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 
 
@@ -10,9 +10,18 @@ $error = "";
 $success = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    require_once '../includes/captcha.php';
 
+    // Validate CAPTCHA for all POST requests
+    if (!isset($_POST['g-recaptcha-response']) || !verifyCaptcha($_POST['g-recaptcha-response'])) {
+        $error = "CAPTCHA verification failed. Please try again.";
+    }
+    // Validate CSRF Token
+    elseif (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        $error = "Invalid CSRF token. Please refresh the page and try again.";
+    }
     // STEP 1: INITIAL REGISTRATION (SEND OTP)
-    if (isset($_POST['register_init'])) {
+    elseif (isset($_POST['register_init'])) {
         $name = trim($_POST['name']);
         $email = trim($_POST['email']);
         $password = $_POST['password'];
@@ -118,6 +127,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <link rel="stylesheet" href="../assets/css/theme.css">
     <link rel="stylesheet" href="../assets/css/register.css">
     <script src="../assets/js/theme.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <style>
         .password-container { position: relative; }
         .toggle-password { position: absolute; right: 10px; top: 38px; cursor: pointer; color: #6c757d; }
@@ -147,6 +157,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                         <?php if(!$otp_sent): ?>
                         <form action="register.php" method="POST" id="registerForm">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            <h3 class="text-center mb-4 fw-bold">Create User Account</h3>
                             <div class="mb-3">
                                 <label for="name" class="form-label">Full Name *</label>
                                 <input type="text" class="form-control" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
@@ -197,6 +209,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                             </div>
 
+                            <div class="mb-3">
+                                <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                            </div>
                             <button type="submit" name="register_init" class="btn btn-primary w-100">Register</button>
                         </form>
                          <?php else: ?>
@@ -208,6 +223,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                                 <div class="mb-3">
                                     <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6">
+                                </div>
+                                <div class="mb-3">
+                                    <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
                                 </div>
                                 <button type="submit" name="verify_otp" class="btn btn-success w-100">Verify & Create Account</button>
                                 <a href="register.php" class="btn btn-link w-100 mt-2">Cancel / Try Again</a>

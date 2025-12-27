@@ -1,6 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Check if worker is logged in
 if (!isset($_SESSION['worker_id'])) {
@@ -98,7 +100,7 @@ $next_job = $next_job_stmt->fetch();
         <div class="container">
             <?php 
                 $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
-                    ? "../uploads/workers/" . $worker['profile_image'] 
+                    ? $cld->getUrl($worker['profile_image'], ['width' => 200, 'height' => 200, 'crop' => 'fill', 'gravity' => 'face']) 
                     : "https://via.placeholder.com/150"; 
             ?>
             <img src="<?php echo $img_src; ?>" class="rounded-circle mb-3 worker-avatar" alt="Profile">
@@ -285,6 +287,6 @@ $next_job = $next_job_stmt->fetch();
     </script>
     <?php include '../includes/worker_footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/laubour/assets/js/theme.js"></script>
+    <script src="<?php echo BASE_URL; ?>/assets/js/theme.js"></script>
 </body>
 </html>

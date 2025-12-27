@@ -1,6 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
+require_once '../includes/cloudinary_helper.php';
+$cld = CloudinaryHelper::getInstance();
 
 // Enforce Login
 if (!isset($_SESSION['user_id'])) {
@@ -31,27 +33,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
         $stmt->execute([$worker_id, $date, $time]);
         
         if ($stmt->rowCount() > 0) {
-            $booking_error = "Worker is not available at this time.";
+            $_SESSION['toast_error'] = "Worker is not available at this time.";
+            header("Location: workers.php");
+            exit;
         } else {
             $sql = "INSERT INTO bookings (user_id, worker_id, service_date, service_time, address, status) VALUES (?, ?, ?, ?, ?, 'pending')";
             $stmt = $pdo->prepare($sql);
             if ($stmt->execute([$user_id, $worker_id, $date, $time, $address])) {
-                $booking_msg = "Booking request sent successfully! Check your dashboard.";
+                $_SESSION['toast_success'] = "Booking request sent successfully! Check your dashboard.";
+                header("Location: workers.php");
+                exit;
             } else {
-                $booking_error = "Failed to book worker.";
+                $_SESSION['toast_error'] = "Failed to book worker.";
+                header("Location: workers.php");
+                exit;
             }
         }
     }
 }
 
-// Get User PIN if logged in
-$user_pin = null;
-if (isset($_SESSION['user_id'])) {
-    $stmt = $pdo->prepare("SELECT pin_code FROM users WHERE id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $u = $stmt->fetch();
-    if ($u) $user_pin = $u['pin_code'];
-}
+// ... (rest of the code)
 
 // Build Query - Filter workers by user's PIN code
 $query = "SELECT w.*, c.name as category_name, c.icon as category_icon, 
@@ -59,9 +60,20 @@ $query = "SELECT w.*, c.name as category_name, c.icon as category_icon,
           FROM workers w 
           LEFT JOIN categories c ON w.service_category_id = c.id 
           LEFT JOIN reviews r ON w.id = r.worker_id
-          WHERE w.status = 'approved' AND w.is_available = 1";
+          WHERE w.status = 'approved'";
 
 $params = [];
+
+// Get user's PIN code if logged in
+$user_pin = null;
+if (isset($_SESSION['user_id'])) {
+    $user_stmt = $pdo->prepare("SELECT pin_code FROM users WHERE id = ?");
+    $user_stmt->execute([$_SESSION['user_id']]);
+    $user_data = $user_stmt->fetch();
+    if ($user_data && !empty($user_data['pin_code'])) {
+        $user_pin = $user_data['pin_code'];
+    }
+}
 
 // Filter by user's PIN code if logged in
 if ($user_pin) {
@@ -133,13 +145,6 @@ $categories = $cat_stmt->fetchAll();
     <?php include '../includes/navbar.php'; ?>
 
     <div class="container py-5">
-        
-        <?php if($booking_msg): ?>
-            <div class="alert alert-success alert-dismissible fade show"><?php echo $booking_msg; ?> <a href="dashboard.php">View Dashboard</a><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-        <?php endif; ?>
-        <?php if($booking_error): ?>
-            <div class="alert alert-danger alert-dismissible fade show"><?php echo $booking_error; ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-        <?php endif; ?>
 
         <div class="row">
             <!-- Sidebar / Filter -->
@@ -191,19 +196,27 @@ $categories = $cat_stmt->fetchAll();
                                                 <div class="rounded-circle bg-body-secondary d-inline-flex align-items-center justify-content-center border overflow-hidden" style="width: 80px; height: 80px;">
                                                     <?php 
                                                         $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
-                                                            ? "../uploads/workers/" . $worker['profile_image'] 
+                                                            ? $worker['profile_image'] 
                                                             : null;
                                                         
                                                         if ($img_src):
+                                                            $thumb_url = $cld->getUrl($img_src, ['width' => 160, 'height' => 160, 'crop' => 'fill', 'gravity' => 'face']);
                                                     ?>
-                                                        <img src="<?php echo $img_src; ?>" alt="Worker" class="w-100 h-100 object-fit-cover">
+                                                        <img src="<?php echo $thumb_url; ?>" alt="Worker" class="w-100 h-100 object-fit-cover">
                                                     <?php else: ?>
                                                         <i class="fas <?php echo $worker['category_icon'] ? $worker['category_icon'] : 'fa-user'; ?> fa-2x text-secondary"></i>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
                                             <h5 class="card-title mb-1"><?php echo htmlspecialchars($worker['name']); ?></h5>
-                                            <span class="badge bg-info text-dark mb-2"><?php echo htmlspecialchars($worker['category_name']); ?></span>
+                                            <div class="mb-2">
+                                                <span class="badge bg-info text-dark"><?php echo htmlspecialchars($worker['category_name']); ?></span>
+                                                <?php if ($worker['is_available']): ?>
+                                                    <span class="badge bg-success shadow-sm ms-1"><i class="fas fa-check-circle me-1"></i> Available</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-secondary shadow-sm ms-1 opacity-75"><i class="fas fa-clock me-1"></i> Busy</span>
+                                                <?php endif; ?>
+                                            </div>
                                             
                                             <div class="mb-2 text-warning small">
                                                 <?php 
@@ -226,8 +239,7 @@ $categories = $cat_stmt->fetchAll();
                                                 <a href="worker_profile.php?id=<?php echo $worker['id']; ?>" class="btn btn-outline-primary btn-sm w-100 rounded-pill">View Profile & Book</a>
                                             </div>
                                         </div>
-                                        </div>
-                                    </a>
+                                    </div>
                             </div>
 
                             <!-- Booking Modal for this Worker -->

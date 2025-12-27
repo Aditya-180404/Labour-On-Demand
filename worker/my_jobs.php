@@ -1,7 +1,8 @@
 <?php
-session_start();
+require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
+require_once '../includes/cloudinary_helper.php';
 
 // Check if worker is logged in
 if (!isset($_SESSION['worker_id'])) {
@@ -56,57 +57,100 @@ if (isset($_POST['booking_action']) && isset($_POST['booking_id'])) {
     }
 }
 
-// Handle Booking Completion
-if (isset($_POST['complete_booking']) && isset($_POST['booking_id']) && isset($_POST['amount_paid'])) {
+// Handle Booking Completion - Step 1: Upload Proof & Send OTP
+if (isset($_POST['initiate_completion']) && isset($_POST['booking_id']) && isset($_POST['amount_paid'])) {
     $booking_id = $_POST['booking_id'];
     $amount_paid = $_POST['amount_paid'];
     
     if ($amount_paid < 0) {
         $error_msg = "Amount received cannot be negative.";
     } else {
-        $completion_time = date('Y-m-d H:i:s');
-        
-        // Verify booking belongs to this worker and is active
-        $stmt = $pdo->prepare("SELECT id, user_id, service_date FROM bookings WHERE id = ? AND worker_id = ? AND status = 'accepted'");
+        // Verify booking
+        $stmt = $pdo->prepare("SELECT b.id, b.user_id, u.name as user_name, u.email as user_email, w.name as worker_name 
+                               FROM bookings b 
+                               JOIN users u ON b.user_id = u.id 
+                               JOIN workers w ON b.worker_id = w.id 
+                               WHERE b.id = ? AND b.worker_id = ? AND b.status = 'accepted'");
         $stmt->execute([$booking_id, $worker_id]);
         $booking_data = $stmt->fetch();
         
         if ($booking_data) {
-            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'completed', amount_paid = ?, completion_time = ? WHERE id = ?");
-            if ($update_stmt->execute([$amount_paid, $completion_time, $booking_id])) {
-                $success_msg = "Job marked as completed. Amount received: ₹" . htmlspecialchars($amount_paid);
-
-                // SEND EMAIL TO USER (Bill/Thank You)
-                $u_stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
-                $u_stmt->execute([$booking_data['user_id']]);
-                $user = $u_stmt->fetch();
-
-                if ($user) {
-                    $subject = "Job Completed - Billing Details";
-                    $message = "
-                        <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
-                            <h2 style='color: #0d6efd;'>Thank You!</h2>
-                            <p>Hello <strong>{$user['name']}</strong>,</p>
-                            <p>The job has been marked as completed by the worker.</p>
-                            <div style='background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;'>
-                                <h3>Invoice Summary</h3>
-                                <p><strong>Service Date:</strong> " . date('M d, Y', strtotime($booking_data['service_date'])) . "</p>
-                                <p><strong>Total Amount Paid:</strong> <span style='font-size: 1.2em; color: #198754; font-weight: bold;'>₹{$amount_paid}</span></p>
-                            </div>
-                            <p>We hope you were satisfied with the service. Please login to leave a review!</p>
-                            <a href='http://localhost/laubour/customer/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #0d6efd; text-decoration: none; border-radius: 5px;'>Leave a Review</a>
-                            <br><br>
-                            <p>Regards,<br>Team Labour On Demand</p>
-                        </div>";
-                    sendEmail($user['email'], $user['name'], $subject, $message);
+            // Handle File Uploads (CLOUD STORAGE)
+            $proof_images_urls = [];
+            $proof_images_ids = [];
+            $cld = CloudinaryHelper::getInstance();
+            
+            if (isset($_FILES['work_proof'])) {
+                $total_files = count($_FILES['work_proof']['name']);
+                for ($i = 0; $i < $total_files; $i++) {
+                    if ($_FILES['work_proof']['error'][$i] == 0) {
+                        $upload = $cld->uploadImage($_FILES['work_proof']['tmp_name'][$i], CLD_FOLDER_WORKER_WORK_DONE, 'standard');
+                        if ($upload) {
+                            $proof_images_urls[] = $upload['url'];
+                            $proof_images_ids[] = $upload['public_id'];
+                        }
+                    }
                 }
-
+            }
+            
+            $proof_images_str = implode(',', $proof_images_urls);
+            $proof_ids_str = implode(',', $proof_images_ids);
+            
+            // Generate OTP
+            $otp = rand(100000, 999999);
+            $expires_at = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+            
+            // Update Booking with Temp Data
+            $update_stmt = $pdo->prepare("UPDATE bookings SET amount_paid = ?, work_proof_images = ?, work_done_public_ids = ?, completion_otp = ?, completion_otp_expires_at = ? WHERE id = ?");
+            if ($update_stmt->execute([$amount_paid, $proof_images_str, $proof_ids_str, $otp, $expires_at, $booking_id])) {
+                
+                // Send OTP Email
+                $mail_result = sendBookingCompletionOTP($booking_data['user_email'], $otp, $booking_data['user_name'], $booking_data['worker_name']);
+                
+                if ($mail_result['status']) {
+                    $success_msg = "Proof uploaded. OTP sent to customer for verification.";
+                } else {
+                    $error_msg = "Proof uploaded but failed to send OTP email: " . $mail_result['message'];
+                }
             } else {
-                $error_msg = "Failed to update status.";
+                $error_msg = "Failed to update booking details.";
             }
         } else {
             $error_msg = "Invalid booking or already completed.";
         }
+    }
+}
+
+// Handle Booking Completion - Step 2: Verify OTP
+if (isset($_POST['verify_completion']) && isset($_POST['booking_id']) && isset($_POST['otp'])) {
+    $booking_id = $_POST['booking_id'];
+    $entered_otp = trim($_POST['otp']);
+    
+    // Verify booking and OTP
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND worker_id = ? AND status = 'accepted'");
+    $stmt->execute([$booking_id, $worker_id]);
+    $booking = $stmt->fetch();
+    
+    if ($booking) {
+        if ($booking['completion_otp'] == $entered_otp) {
+            
+            // Validate Expiry (Optional, if you want strictly 10 mins)
+            // if (strtotime($booking['completion_otp_expires_at']) < time()) { ... }
+            
+            $completion_time = date('Y-m-d H:i:s');
+            
+            // Mark Completed
+            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'completed', completion_time = ?, completion_otp = NULL, completion_otp_expires_at = NULL WHERE id = ?");
+            if ($update_stmt->execute([$completion_time, $booking_id])) {
+                 $success_msg = "Job successfully marked as completed!";
+            } else {
+                 $error_msg = "Database error verifying OTP.";
+            }
+        } else {
+            $error_msg = "Invalid OTP. Please ask the customer for the correct code.";
+        }
+    } else {
+        $error_msg = "Invalid booking.";
     }
 }
 
@@ -300,9 +344,18 @@ $history_bookings = $history_stmt->fetchAll();
                                                     <a href="tel:<?php echo htmlspecialchars($booking['user_phone']); ?>" class="btn btn-light btn-sm rounded-pill py-0 px-2 small text-primary border"><i class="fas fa-phone-alt me-1"></i>Call</a>
                                                 </td>
                                                 <td>
-                                                    <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 shadow-sm mb-1" data-bs-toggle="modal" data-bs-target="#completeModal<?php echo $booking['id']; ?>">
-                                                        Mark Done
-                                                    </button>
+                                                    <?php if(!empty($booking['completion_otp'])): ?>
+                                                        <!-- OTP Sent State -->
+                                                        <button type="button" class="btn btn-warning btn-sm rounded-pill px-3 shadow-sm mb-1" data-bs-toggle="modal" data-bs-target="#verifyModal<?php echo $booking['id']; ?>">
+                                                            <i class="fas fa-key me-1"></i>Verify OTP
+                                                        </button>
+                                                    <?php else: ?>
+                                                        <!-- Initial State -->
+                                                        <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 shadow-sm mb-1" data-bs-toggle="modal" data-bs-target="#completeModal<?php echo $booking['id']; ?>">
+                                                            Mark Done
+                                                        </button>
+                                                    <?php endif; ?>
+
                                                     <button type="button" class="btn btn-outline-warning btn-sm rounded-pill px-3 shadow-sm mb-1" data-bs-toggle="modal" data-bs-target="#extendModal<?php echo $booking['id']; ?>">
                                                         <i class="fas fa-clock me-1"></i>Extend
                                                     </button>
@@ -331,16 +384,18 @@ $history_bookings = $history_stmt->fetchAll();
                                                         </div>
                                                     </div>
                                                     
-                                                    <!-- Complete Modal -->
+                                                    <!-- Step 1: Upload & Request Modal -->
                                                     <div class="modal fade" id="completeModal<?php echo $booking['id']; ?>" tabindex="-1">
                                                         <div class="modal-dialog modal-dialog-centered">
                                                             <div class="modal-content border-0 shadow rounded-4">
                                                                 <div class="modal-header border-0 pb-0">
-                                                                    <h5 class="modal-title fw-bold">Job Completion</h5>
+                                                                    <h5 class="modal-title fw-bold">Job Completion Proof</h5>
                                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                                 </div>
-                                                                <form method="POST">
+                                                                <form method="POST" enctype="multipart/form-data">
                                                                     <div class="modal-body p-4">
+                                                                        <p class="small text-muted mb-3">Upload photos of the work done and enter the amount received. An OTP will be sent to the customer.</p>
+                                                                        
                                                                         <div class="mb-3">
                                                                             <label class="form-label small fw-bold text-muted">Amount Received (₹)</label>
                                                                             <div class="input-group">
@@ -348,9 +403,41 @@ $history_bookings = $history_stmt->fetchAll();
                                                                                 <input type="number" name="amount_paid" class="form-control bg-body-secondary border-0 text-body" required placeholder="0.00" min="0" step="0.01">
                                                                             </div>
                                                                         </div>
+                                                                        
+                                                                        <div class="mb-3">
+                                                                            <label class="form-label small fw-bold text-muted">Work Proof Photos</label>
+                                                                            <input type="file" name="work_proof[]" class="form-control" multiple accept="image/*" required>
+                                                                            <div class="form-text">You can select multiple images.</div>
+                                                                        </div>
+
                                                                         <input type="hidden" name="booking_id" value="<?php echo $booking['id']; ?>">
-                                                                        <input type="hidden" name="complete_booking" value="1">
-                                                                        <button type="submit" class="btn btn-success w-100 rounded-pill py-2 fw-bold">Confirm & Finish</button>
+                                                                        <input type="hidden" name="initiate_completion" value="1">
+                                                                        <button type="submit" class="btn btn-primary w-100 rounded-pill py-2 fw-bold">Upload & Send OTP</button>
+                                                                    </div>
+                                                                </form>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Step 2: Verify OTP Modal -->
+                                                    <div class="modal fade" id="verifyModal<?php echo $booking['id']; ?>" tabindex="-1">
+                                                        <div class="modal-dialog modal-dialog-centered">
+                                                            <div class="modal-content border-0 shadow rounded-4">
+                                                                <div class="modal-header border-0 pb-0">
+                                                                    <h5 class="modal-title fw-bold">Verify OTP</h5>
+                                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                                </div>
+                                                                <form method="POST">
+                                                                    <div class="modal-body p-4 text-center">
+                                                                        <p class="text-muted small mb-4">Enter the 6-digit code sent to <strong><?php echo htmlspecialchars($booking['user_name']); ?></strong> to complete this job.</p>
+                                                                        
+                                                                        <div class="mb-4">
+                                                                            <input type="text" name="otp" class="form-control text-center fs-2 letter-spacing-2" placeholder="XXXXXX" maxlength="6" required style="letter-spacing: 5px;">
+                                                                        </div>
+
+                                                                        <input type="hidden" name="booking_id" value="<?php echo $booking['id']; ?>">
+                                                                        <input type="hidden" name="verify_completion" value="1">
+                                                                        <button type="submit" class="btn btn-success w-100 rounded-pill py-2 fw-bold">Verify & Finish</button>
                                                                     </div>
                                                                 </form>
                                                             </div>
@@ -411,7 +498,7 @@ $history_bookings = $history_stmt->fetchAll();
 
     <?php include '../includes/worker_footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/laubour/assets/js/theme.js"></script>
+    <script src="<?php echo BASE_URL; ?>/assets/js/theme.js"></script>
     <script>
         // Real-time Validation for Job Completion
         document.addEventListener('DOMContentLoaded', function() {

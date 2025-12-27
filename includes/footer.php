@@ -1,4 +1,6 @@
 <?php
+if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.');
+
 // Determine the base path for links
 $is_subfolder = (strpos($_SERVER['PHP_SELF'], '/worker/') !== false || 
                  strpos($_SERVER['PHP_SELF'], '/admin/') !== false || 
@@ -73,6 +75,7 @@ if (isset($_SESSION['user_id'])) {
                     </div>
                 <?php else: ?>
                     <form id="feedbackForm" class="row g-2">
+                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="sender_type" value="customer">
                         <div class="col-6">
                             <input type="text" name="name" class="form-control form-control-sm bg-body" placeholder="Your Name" value="<?php echo htmlspecialchars($pre_name); ?>" required>
@@ -96,6 +99,10 @@ if (isset($_SESSION['user_id'])) {
                                 Sending as <span class="text-primary fw-bold"><?php echo $user_type; ?></span>
                             </small>
                         </div>
+                        <div class="col-12">
+                             <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                        </div>
+                        <script src="https://www.google.com/recaptcha/api.js" async defer></script>
                     </form>
                     <div id="feedbackStatus" class="mt-2 small"></div>
                 <?php endif; ?>
@@ -119,6 +126,7 @@ document.getElementById('feedbackForm').addEventListener('submit', function(e) {
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sending...';
     
     const formData = new FormData(form);
+    formData.append('g-recaptcha-response', grecaptcha.getResponse());
     
     fetch('<?php echo $base_path; ?>process_feedback.php', {
         method: 'POST',
@@ -143,3 +151,6 @@ document.getElementById('feedbackForm').addEventListener('submit', function(e) {
     });
 });
 </script>
+
+<?php include 'lightbox.php'; ?>
+<?php include 'toast.php'; ?>

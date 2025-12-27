@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `location` VARCHAR(100),
     `otp` VARCHAR(6) DEFAULT NULL,
     `otp_expires_at` DATETIME DEFAULT NULL,
+    `profile_image_public_id` VARCHAR(255) DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -46,10 +47,21 @@ CREATE TABLE IF NOT EXISTS `workers` (
     `aadhar_photo` VARCHAR(255),
     `pan_photo` VARCHAR(255),
     `signature_photo` VARCHAR(255) DEFAULT NULL,
+    `pending_signature_photo` VARCHAR(255) DEFAULT NULL,
     `previous_work_images` TEXT DEFAULT NULL,
     `working_location` VARCHAR(100),
     `otp` VARCHAR(6) DEFAULT NULL,
     `otp_expires_at` DATETIME DEFAULT NULL,
+    `profile_image_public_id` VARCHAR(255) DEFAULT NULL,
+    `aadhar_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `pan_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `signature_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `previous_work_public_ids` TEXT DEFAULT NULL,
+    `pending_profile_image_public_id` VARCHAR(255) DEFAULT NULL,
+    `pending_aadhar_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `pending_pan_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `pending_signature_photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `doc_update_status` ENUM('approved', 'pending', 'rejected') DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`service_category_id`) REFERENCES `categories`(`id`) ON DELETE SET NULL
 );
@@ -68,6 +80,8 @@ CREATE TABLE IF NOT EXISTS `bookings` (
     `completion_time` DATETIME,
     `booking_latitude` DECIMAL(10, 8),
     `booking_longitude` DECIMAL(11, 8),
+    `work_proof_images` TEXT DEFAULT NULL,
+    `work_done_public_ids` TEXT DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE CASCADE
@@ -106,3 +120,32 @@ INSERT IGNORE INTO `categories` (`name`, `icon`) VALUES
 ('Painter', 'fa-paint-roller'),
 ('Carpenter', 'fa-hammer'),
 ('Helper', 'fa-hands-helping');
+
+-- Worker Photo/Document Change History
+CREATE TABLE IF NOT EXISTS `worker_photo_history` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `worker_id` INT NOT NULL,
+    `photo_type` ENUM('profile', 'aadhar', 'pan', 'signature') NOT NULL,
+    `photo_path` VARCHAR(255) NOT NULL,
+    `photo_public_id` VARCHAR(255) DEFAULT NULL,
+    `replaced_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE CASCADE
+);
+
+-- Feedbacks Table
+CREATE TABLE IF NOT EXISTS `feedbacks` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT DEFAULT NULL,
+    `worker_id` INT DEFAULT NULL,
+    `sender_role` ENUM('user', 'worker', 'guest') DEFAULT 'guest',
+    `name` VARCHAR(100) NOT NULL,
+    `email` VARCHAR(100) NOT NULL,
+    `subject` VARCHAR(255) NOT NULL,
+    `message` TEXT NOT NULL,
+    `status` ENUM('pending', 'read', 'replied') DEFAULT 'pending',
+    `admin_reply` TEXT DEFAULT NULL,
+    `replied_at` TIMESTAMP NULL DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE CASCADE
+);

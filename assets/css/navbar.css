@@ -141,3 +141,67 @@
         display: none;
     }
 }
+
+/* --- LIGHT MODE OVERRIDES --- */
+[data-bs-theme="light"] .navbar.bg-primary {
+    background: #ffffff !important;
+    /* White Background */
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-bs-theme="light"] .navbar.sticky-nav {
+    background: rgba(255, 255, 255, 0.95) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme="light"] .navbar .nav-link {
+    color: #334155 !important;
+    /* Slate 700 Text */
+}
+
+[data-bs-theme="light"] .navbar .nav-link:hover,
+[data-bs-theme="light"] .navbar .nav-link.active {
+    color: #0d6efd !important;
+    /* Bootstrap Primary Blue */
+}
+
+[data-bs-theme="light"] .navbar .nav-link::after {
+    background: #0d6efd;
+}
+
+[data-bs-theme="light"] .navbar .navbar-brand {
+    color: #1e293b !important;
+    /* Dark Text */
+}
+
+/* Override utility classes in light mode */
+[data-bs-theme="light"] .navbar .text-white {
+    color: #334155 !important;
+}
+
+[data-bs-theme="light"] .navbar .text-white-50 {
+    color: #64748b !important;
+    /* Slate 500 */
+}
+
+[data-bs-theme="light"] .navbar .border-white {
+    border-color: #cbd5e1 !important;
+}
+
+/* Mobile Toggler Dark Icon */
+[data-bs-theme="light"] .navbar .fas.fa-bars {
+    color: #334155 !important;
+}
+
+/* Profile Dropdown Button in Light Mode */
+[data-bs-theme="light"] .navbar .nav-item.dropdown .nav-link {
+    background-color: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+}
+
+/* Mobile Menu Background in Light Mode */
+[data-bs-theme="light"] .navbar-collapse {
+    background: #ffffff;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}

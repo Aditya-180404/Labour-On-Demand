@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once 'config/security.php';
 require_once 'config/db.php';
 
 header('Content-Type: application/json');
@@ -10,6 +10,20 @@ if (!isset($_SESSION['user_id']) && !isset($_SESSION['worker_id'])) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    require_once 'includes/captcha.php';
+
+    // Validate CAPTCHA
+    if (!isset($_POST['g-recaptcha-response']) || !verifyCaptcha($_POST['g-recaptcha-response'])) {
+        echo json_encode(['status' => 'error', 'message' => 'CAPTCHA verification failed.']);
+        exit;
+    }
+
+    // Validate CSRF
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid CSRF token.']);
+        exit;
+    }
+
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
     $subject = trim($_POST['subject']);
