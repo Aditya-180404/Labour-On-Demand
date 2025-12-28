@@ -38,12 +38,14 @@ function sendEmail($to_email, $to_name, $subject, $body, $alt_body = '') {
     }
 }
 
-function sendOTPEmail($to_email, $otp, $name = 'User') {
+function sendOTPEmail($to_email, $otp, $name = 'User', $uid = null) {
     $subject = 'Your OTP Code - Labour On Demand';
+    $uid_html = $uid ? "<p style='color: #666; font-size: 0.9em;'>Your Unique ID: <strong style='color: #333;'>$uid</strong></p>" : "";
     $body = "
         <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
             <h2 style='color: #28a745;'>Labour On Demand</h2>
             <p>Hello <strong>$name</strong>,</p>
+            $uid_html
             <p>Your One-Time Password (OTP) for verification is:</p>
             <h1 style='background: #f4f4f4; padding: 10px; display: inline-block; border-radius: 5px; color: #333;'>$otp</h1>
             <p>This OTP is valid for 10 minutes. Do not share this code with anyone.</p>
@@ -51,26 +53,34 @@ function sendOTPEmail($to_email, $otp, $name = 'User') {
             <p>Regards,<br>Team Labour On Demand</p>
         </div>
     ";
-    $altBody = "Hello $name, Your OTP code is: $otp. Regards, Team Labour On Demand";
+    $altBody = "Hello $name, " . ($uid ? "Your Unique ID is: $uid. " : "") . "Your OTP code is: $otp. Regards, Team Labour On Demand";
 
     return sendEmail($to_email, $name, $subject, $body, $altBody);
 }
 
-function sendBookingCompletionOTP($to_email, $otp, $customer_name, $worker_name) {
+function sendBookingCompletionOTP($to_email, $otp, $customer_name, $worker_name, $domain = 'Service', $pid = 'N/A', $cost = '0') {
     $subject = "Job Completion Verification - Labour On Demand";
     $body = "
         <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
             <h2 style='color: #0d6efd;'>Job Completion Request</h2>
             <p>Hello <strong>$customer_name</strong>,</p>
-            <p>Your worker, <strong>$worker_name</strong>, has marked the job as completed.</p>
-            <p>To verify this and authorize the completion, please provide the following OTP to the worker:</p>
+            <div style='background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;'>
+                <p style='margin: 0 0 10px 0;'><strong>Worker Details:</strong></p>
+                <ul style='list-style: none; padding: 0; margin: 0;'>
+                    <li>Name: <strong>$worker_name</strong></li>
+                    <li>Service: <strong>$domain</strong></li>
+                    <li>Worker ID (PID): <strong>$pid</strong></li>
+                    <li style='margin-top: 10px; font-size: 1.1em;'>Total Charged: <strong style='color: #28a745;'>₹" . number_format($cost, 2) . "</strong></li>
+                </ul>
+            </div>
+            <p>The worker has marked the job as completed. To verify this and authorize the completion, please provide the following OTP to the worker:</p>
             <h1 style='background: #e9ecef; padding: 10px; display: inline-block; border-radius: 5px; color: #495057; letter-spacing: 5px;'>$otp</h1>
-            <p><strong>Note:</strong> Only share this code if you are satisfied that the work is done.</p>
+            <p><strong>Note:</strong> Only share this code if you are satisfied that the work is done. By sharing this, you confirm the amount mentioned above.</p>
             <br>
             <p>Regards,<br>Team Labour On Demand</p>
         </div>
     ";
-    $altBody = "Hello $customer_name, Worker $worker_name has finished the job. Share this OTP to verify: $otp";
+    $altBody = "Hello $customer_name, Worker $worker_name ($pid) has finished the $domain job. Cost: ₹$cost. Share this OTP to verify: $otp";
     return sendEmail($to_email, $customer_name, $subject, $body, $altBody);
 }
 ?>

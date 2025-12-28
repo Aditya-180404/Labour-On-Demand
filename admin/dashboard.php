@@ -40,7 +40,7 @@ if (isset($_POST['action']) && isset($_POST['worker_id'])) {
                         <p>Hello <strong>{$worker['name']}</strong>,</p>
                         <p>Congratulations! Your worker profile has been approved by the admin.</p>
                         <p>You can now login to your account and start accepting bookings.</p>
-                        <a href='http://" . $_SERVER['HTTP_HOST'] . $path_prefix . "worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
+                        <a href='" . getBaseUrl() . "worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -130,12 +130,12 @@ if (isset($_POST['doc_action']) && isset($_POST['worker_id'])) {
 }
 
 // Search Logic
-$worker_q = $_GET['worker_q'] ?? '';
-$user_q = $_GET['user_q'] ?? '';
-$feedback_q = $_GET['feedback_q'] ?? '';
-$booking_q = $_GET['booking_q'] ?? '';
-$booking_status = $_GET['booking_status'] ?? '';
-$history_q = $_GET['history_q'] ?? '';
+$worker_q = isset($_GET['worker_q']) ? trim($_GET['worker_q']) : '';
+$user_q = isset($_GET['user_q']) ? trim($_GET['user_q']) : '';
+$feedback_q = isset($_GET['feedback_q']) ? trim($_GET['feedback_q']) : '';
+$booking_q = isset($_GET['booking_q']) ? trim($_GET['booking_q']) : '';
+$booking_status = isset($_GET['booking_status']) ? trim($_GET['booking_status']) : '';
+$history_q = isset($_GET['history_q']) ? trim($_GET['history_q']) : '';
 
 // Fetch Pending Workers
 $pending_stmt = $pdo->query("SELECT w.*, c.name as category_name FROM workers w LEFT JOIN categories c ON w.service_category_id = c.id WHERE w.status = 'pending'");
@@ -147,8 +147,8 @@ $doc_updates = $doc_updates_stmt->fetchAll();
 
 // Fetch All Workers with Search
 if (!empty($worker_q)) {
-    $all_workers_stmt = $pdo->prepare("SELECT * FROM workers WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY created_at DESC");
-    $all_workers_stmt->execute(["%$worker_q%", "%$worker_q%", "%$worker_q%"]);
+    $all_workers_stmt = $pdo->prepare("SELECT * FROM workers WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? OR worker_uid LIKE ? OR working_location LIKE ? OR pin_code LIKE ? ORDER BY created_at DESC");
+    $all_workers_stmt->execute(["%$worker_q%", "%$worker_q%", "%$worker_q%", "%$worker_q%", "%$worker_q%", "%$worker_q%"]);
 } else {
     $all_workers_stmt = $pdo->query("SELECT * FROM workers ORDER BY created_at DESC");
 }
@@ -156,23 +156,23 @@ $all_workers = $all_workers_stmt->fetchAll();
 
 // Fetch All Users with Search
 if (!empty($user_q)) {
-    $users_stmt = $pdo->prepare("SELECT * FROM users WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY created_at DESC");
-    $users_stmt->execute(["%$user_q%", "%$user_q%", "%$user_q%"]);
+    $users_stmt = $pdo->prepare("SELECT * FROM users WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? OR user_uid LIKE ? OR location LIKE ? OR pin_code LIKE ? ORDER BY created_at DESC");
+    $users_stmt->execute(["%$user_q%", "%$user_q%", "%$user_q%", "%$user_q%", "%$user_q%", "%$user_q%"]);
 } else {
     $users_stmt = $pdo->query("SELECT * FROM users ORDER BY created_at DESC");
 }
 $users = $users_stmt->fetchAll();
 
 // Fetch All Bookings with search & filter
-$booking_sql = "SELECT b.*, u.name as user_name, u.pin_code as user_pin, w.name as worker_name 
+$booking_sql = "SELECT b.*, u.name as user_name, u.user_uid, u.pin_code as user_pin, w.name as worker_name, w.worker_uid 
                 FROM bookings b 
                 JOIN users u ON b.user_id = u.id 
                 JOIN workers w ON b.worker_id = w.id WHERE 1=1";
 $booking_params = [];
 
 if (!empty($booking_q)) {
-    $booking_sql .= " AND (u.name LIKE ? OR w.name LIKE ? OR b.address LIKE ? OR b.service_date LIKE ?)";
-    $booking_params = array_merge($booking_params, ["%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%"]);
+    $booking_sql .= " AND (u.name LIKE ? OR w.name LIKE ? OR b.address LIKE ? OR b.service_date LIKE ? OR u.user_uid LIKE ? OR w.worker_uid LIKE ? OR u.pin_code LIKE ? OR u.location LIKE ?)";
+    $booking_params = array_merge($booking_params, ["%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%", "%$booking_q%"]);
 }
 
 if (!empty($booking_status)) {
@@ -187,19 +187,32 @@ $bookings = $bookings_stmt->fetchAll();
 
 // Fetch Document History with search
 if (!empty($history_q)) {
-    $history_stmt = $pdo->prepare("SELECT h.*, w.name as worker_name FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id WHERE w.name LIKE ? OR h.photo_type LIKE ? ORDER BY h.replaced_at DESC");
-    $history_stmt->execute(["%$history_q%", "%$history_q%"]);
+    $history_stmt = $pdo->prepare("SELECT h.*, w.name as worker_name, w.worker_uid FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id WHERE w.name LIKE ? OR h.photo_type LIKE ? OR w.worker_uid LIKE ? ORDER BY h.replaced_at DESC");
+    $history_stmt->execute(["%$history_q%", "%$history_q%", "%$history_q%"]);
 } else {
-    $history_stmt = $pdo->query("SELECT h.*, w.name as worker_name FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id ORDER BY h.replaced_at DESC");
+    $history_stmt = $pdo->query("SELECT h.*, w.name as worker_name, w.worker_uid FROM worker_photo_history h JOIN workers w ON h.worker_id = w.id ORDER BY h.replaced_at DESC");
 }
 $doc_history = $history_stmt->fetchAll();
 
-// Fetch Feedbacks with Search
+// Fetch Feedbacks with Search (including UID check)
 if (!empty($feedback_q)) {
-    $feedbacks_stmt = $pdo->prepare("SELECT * FROM feedbacks WHERE name LIKE ? OR email LIKE ? OR subject LIKE ? OR message LIKE ? ORDER BY created_at DESC");
-    $feedbacks_stmt->execute(["%$feedback_q%", "%$feedback_q%", "%$feedback_q%", "%$feedback_q%"]);
+    $feedbacks_stmt = $pdo->prepare("
+        SELECT f.*, u.user_uid, w.worker_uid 
+        FROM feedbacks f 
+        LEFT JOIN users u ON f.user_id = u.id 
+        LEFT JOIN workers w ON f.worker_id = w.id
+        WHERE f.name LIKE ? OR f.email LIKE ? OR f.subject LIKE ? OR f.message LIKE ? OR u.user_uid LIKE ? OR w.worker_uid LIKE ?
+        ORDER BY f.created_at DESC
+    ");
+    $feedbacks_stmt->execute(["%$feedback_q%", "%$feedback_q%", "%$feedback_q%", "%$feedback_q%", "%$feedback_q%", "%$feedback_q%"]);
 } else {
-    $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
+    $feedbacks_stmt = $pdo->query("
+        SELECT f.*, u.user_uid, w.worker_uid 
+        FROM feedbacks f 
+        LEFT JOIN users u ON f.user_id = u.id 
+        LEFT JOIN workers w ON f.worker_id = w.id 
+        ORDER BY f.created_at DESC
+    ");
 }
 $feedbacks = $feedbacks_stmt->fetchAll();
 
@@ -214,6 +227,12 @@ function renderFeedbackTable($feedbacks, $showRole = true, $context = 'default')
                 <td><small class="text-muted"><?php echo date('M d, Y', strtotime($fb['created_at'])); ?></small></td>
                 <td>
                     <strong><?php echo htmlspecialchars($fb['name']); ?></strong>
+                    <?php 
+                        $uid = ($fb['sender_role'] == 'user') ? $fb['user_uid'] : (($fb['sender_role'] == 'worker') ? $fb['worker_uid'] : null);
+                        if ($uid): 
+                    ?>
+                        <br><small class="text-muted font-monospace">ID: <?php echo htmlspecialchars($uid); ?></small>
+                    <?php endif; ?>
                 </td>
                 <?php if($showRole): ?>
                 <td>
@@ -347,8 +366,14 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
         $error_msg = "Failed to send email: " . $email_result['message'];
     }
 
-    // Refresh data
-    $feedbacks_stmt = $pdo->query("SELECT * FROM feedbacks ORDER BY created_at DESC");
+    // Refresh data preserving joins for UIDs
+    $feedbacks_stmt = $pdo->query("
+        SELECT f.*, u.user_uid, w.worker_uid 
+        FROM feedbacks f 
+        LEFT JOIN users u ON f.user_id = u.id 
+        LEFT JOIN workers w ON f.worker_id = w.id 
+        ORDER BY f.created_at DESC
+    ");
     $feedbacks = $feedbacks_stmt->fetchAll();
 }
 ?>
@@ -541,18 +566,20 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                         <div class="table-responsive">
                             <table class="table table-hover mb-0">
                                 <thead class="table-light">
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Category</th>
-                                        <th>Email</th>
-                                        <th>Phone</th>
-                                        <th>Rate</th>
-                                        <th>Actions</th>
-                                    </tr>
+                                        <tr>
+                                            <th>UID</th>
+                                            <th>Name</th>
+                                            <th>Category</th>
+                                            <th>Email</th>
+                                            <th>Phone</th>
+                                            <th>Rate</th>
+                                            <th>Actions</th>
+                                        </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach($pending_workers as $worker): ?>
                                         <tr>
+                                             <td><span class="badge bg-dark font-monospace"><?php echo htmlspecialchars($worker['worker_uid']); ?></span></td>
                                              <td>
                                                  <a href="view_worker.php?id=<?php echo $worker['id']; ?>" class="text-decoration-none fw-bold">
                                                      <?php echo htmlspecialchars($worker['name']); ?>
@@ -709,22 +736,24 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                              <div class="table-responsive">
                                 <table class="table table-striped mb-0">
                                     <thead>
-                                        <tr>
-                                            <th>ID</th>
-                                            <th>Name</th>
-                                            <th>Email</th>
-                                            <th>Phone</th>
-                                            <th>PIN Codes</th>
-                                            <th>Available</th>
-                                            <th>Status</th>
-                                            <th>Joined</th>
-                                            <th>Action</th>
-                                        </tr>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>UID</th>
+                                                <th>Name</th>
+                                                <th>Email</th>
+                                                <th>Phone</th>
+                                                <th>PIN Codes</th>
+                                                <th>Available</th>
+                                                <th>Status</th>
+                                                <th>Joined</th>
+                                                <th>Action</th>
+                                            </tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach($all_workers as $w): ?>
                                             <tr>
                                                 <td>#<?php echo $w['id']; ?></td>
+                                                <td><span class="badge bg-dark font-monospace"><?php echo htmlspecialchars($w['worker_uid']); ?></span></td>
                                                  <td>
                                                      <a href="view_worker.php?id=<?php echo $w['id']; ?>" class="text-decoration-none fw-bold">
                                                          <?php echo htmlspecialchars($w['name']); ?>
@@ -801,6 +830,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                     <thead>
                                         <tr>
                                             <th>ID</th>
+                                            <th>UID</th>
                                             <th>Name</th>
                                             <th>Email</th>
                                             <th>Phone</th>
@@ -812,6 +842,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                         <?php foreach($users as $u): ?>
                                             <tr>
                                                 <td>#<?php echo $u['id']; ?></td>
+                                                <td><span class="badge bg-dark font-monospace"><?php echo htmlspecialchars($u['user_uid']); ?></span></td>
                                                 <td><?php echo htmlspecialchars($u['name']); ?></td>
                                                 <td><?php echo htmlspecialchars($u['email']); ?></td>
                                                 <td><?php echo htmlspecialchars($u['phone']); ?></td>
@@ -870,7 +901,6 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                         <tr>
                                             <th>ID</th>
                                             <th>User</th>
-                                            <th>User PIN</th>
                                             <th>Worker</th>
                                             <th>Date & Time</th>
                                             <th>Status</th>
@@ -881,18 +911,18 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                         <?php foreach($bookings as $b): ?>
                                             <tr>
                                                 <td>#<?php echo $b['id']; ?></td>
-                                                <td><?php echo htmlspecialchars($b['user_name']); ?></td>
                                                 <td>
+                                                    <div class="fw-bold"><?php echo htmlspecialchars($b['user_name']); ?></div>
+                                                    <small class="text-muted font-monospace"><?php echo htmlspecialchars($b['user_uid'] ?? 'N/A'); ?></small>
                                                     <?php if($b['user_pin']): ?>
-                                                        <span class="badge bg-info"><?php echo htmlspecialchars($b['user_pin']); ?></span>
-                                                    <?php else: ?>
-                                                        <span class="text-muted">-</span>
+                                                        <br><span class="badge bg-info" style="font-size: 0.7em;"><?php echo htmlspecialchars($b['user_pin']); ?></span>
                                                     <?php endif; ?>
                                                 </td>
                                                  <td>
-                                                     <a href="view_worker.php?id=<?php echo $b['worker_id']; ?>" class="text-decoration-none">
+                                                     <a href="view_worker.php?id=<?php echo $b['worker_id']; ?>" class="text-decoration-none fw-bold">
                                                          <?php echo htmlspecialchars($b['worker_name']); ?>
                                                      </a>
+                                                     <br><small class="text-muted font-monospace"><?php echo htmlspecialchars($b['worker_uid'] ?? 'N/A'); ?></small>
                                                  </td>
                                                 <td>
                                                     <div class="fw-bold"><?php echo date('M d, Y', strtotime($b['service_date'])); ?></div>
@@ -1101,6 +1131,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                         <tr>
                                             <th>Date</th>
                                             <th>Worker</th>
+                                            <th>UID</th>
                                             <th>Doc Type</th>
                                             <th>Archived Preview</th>
                                             <th>Action Type</th>
@@ -1119,6 +1150,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                                             <?php echo htmlspecialchars($h['worker_name']); ?>
                                                         </a>
                                                     </td>
+                                                    <td class="font-monospace small"><?php echo htmlspecialchars($h['worker_uid']); ?></td>
                                                     <td>
                                                         <span class="badge bg-info text-dark">
                                                             <?php echo strtoupper($h['photo_type']); ?>

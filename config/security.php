@@ -5,10 +5,20 @@ if (!defined('EXECUTION_ALLOWED')) {
     define('EXECUTION_ALLOWED', true);
 }
 
-// Enable error reporting for debugging
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+// 0. Anti-DDoS Rate Limiting
+require_once __DIR__ . '/rate_limiter.php';
+
+// 1.5 Environment-Aware Error Reporting
+$is_local_env = (isset($_SERVER['SERVER_NAME']) && ($_SERVER['SERVER_NAME'] == 'localhost' || $_SERVER['SERVER_NAME'] == '127.0.0.1'));
+if ($is_local_env) {
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+} else {
+    error_reporting(0);
+    ini_set('display_errors', 0);
+    ini_set('display_startup_errors', 0);
+}
 
 // 2. Security Headers
 // Prevent Clickjacking
@@ -26,7 +36,10 @@ ini_set('session.cookie_httponly', 1);
 // Force cookies only (no URL based sessions)
 ini_set('session.use_only_cookies', 1);
 // Secure cookie for HTTPS
-if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
+$is_https = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') || 
+            (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
+if ($is_https) {
     ini_set('session.cookie_secure', 1);
 }
 
@@ -81,6 +94,35 @@ if (!function_exists('incrementLoginAttempts')) {
         }
         $_SESSION['login_attempts']++;
         $_SESSION['last_attempt_time'] = time();
+    }
+}
+
+/**
+ * Portable Base URL Helper
+ * Returns the correct root URL regardless of protocol (HTTP/HTTPS) or subfolder.
+ */
+if (!function_exists('getBaseUrl')) {
+    function getBaseUrl() {
+        $is_https = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') || 
+                    (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+        $protocol = $is_https ? "https://" : "http://";
+        $host = $_SERVER['HTTP_HOST'];
+        
+        // Dynamic base path detection
+        // We know security.php is always in {ROOT}/config/security.php
+        $current_script = str_replace('\\', '/', __FILE__);
+        $doc_root = str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']);
+        
+        // Find the project root by stripping '/config/security.php' from the current file path
+        $project_root_abs = str_replace('/config/security.php', '', $current_script);
+        
+        // The base URL path is the difference between project root and document root
+        $base_path = str_replace($doc_root, '', $project_root_abs);
+        $base_path = '/' . trim($base_path, '/') . '/';
+        $base_path = str_replace('//', '/', $base_path);
+        
+        $base_url = $protocol . $host . $base_path;
+        return $base_url;
     }
 }
 ?>

@@ -3,6 +3,7 @@ require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
 require_once '../includes/cloudinary_helper.php';
+require_once '../includes/utils.php';
 
 $otp_sent = false;
 $error = "";
@@ -12,13 +13,36 @@ $success = "";
 $stmt = $pdo->query("SELECT id, name FROM categories");
 $categories = $stmt->fetchAll();
 
+// Get server limits for reporting and validation
+function parse_size($size) {
+    $unit = preg_replace('/[^bkmgtp]/i', '', $size);
+    $size = preg_replace('/[^0-9\.]/', '', $size);
+    if ($unit) {
+        return round($size * pow(1024, stripos('bkmgtp', $unit[0])), 2);
+    } else {
+        return round($size, 2);
+    }
+}
+
+$post_max_size_raw = ini_get('post_max_size');
+$upload_max_filesize_raw = ini_get('upload_max_filesize');
+$post_max_size_bytes = parse_size($post_max_size_raw);
+$upload_max_size_bytes = parse_size($upload_max_filesize_raw);
+$post_max_size_mb = round($post_max_size_bytes / 1024 / 1024, 2);
+$upload_max_size_mb = round($upload_max_size_bytes / 1024 / 1024, 2);
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Check if POST data is lost because it exceeded post_max_size
     if (empty($_POST) && $_SERVER['CONTENT_LENGTH'] > 0) {
-        $max_size = ini_get('post_max_size');
-        $error = "The uploaded file size is too large (Total: " . round($_SERVER['CONTENT_LENGTH'] / 1024 / 1024, 2) . "MB). The limit is approximately $max_size. Please use smaller images or contact support.";
+        $msg_size = round($_SERVER['CONTENT_LENGTH'] / 1024 / 1024, 2);
+        $error = "The uploaded data size ($msg_size MB) exceeds the server's safety guardrail (approximately $post_max_size_mb MB per request). Even though we compress images automatically, very large initial uploads may be blocked by the server for security. Please try reducing the number of images or using slightly smaller files.";
     } else {
         require_once '../includes/captcha.php';
+        
+        // Honeypot check
+        if (!empty($_POST['middle_name'])) {
+            die("Bot detected."); // Silent fail for bots
+        }
 
         // Validate CAPTCHA and CSRF
         $captcha_valid = isset($_POST['g-recaptcha-response']) && verifyCaptcha($_POST['g-recaptcha-response']);
@@ -31,7 +55,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'post_data_count' => count($_POST),
                 'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 'N/A'
             ];
-            file_put_contents('c:/xampp/htdocs/laubour/register_debug.log', "CAPTCHA FAIL: " . print_r($debug_info, true), FILE_APPEND);
+            file_put_contents(__DIR__ . '/register_debug.log', "CAPTCHA FAIL: " . print_r($debug_info, true), FILE_APPEND);
             $error = "CAPTCHA verification failed. Please try again.";
         }
         elseif (!$csrf_valid) {
@@ -42,7 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'session_id' => session_id(),
                 'post_keys' => array_keys($_POST)
             ];
-            file_put_contents('c:/xampp/htdocs/laubour/csrf_debug.log', "CSRF FAIL: " . print_r($csrf_debug, true), FILE_APPEND);
+            file_put_contents(__DIR__ . '/csrf_debug.log', "CSRF FAIL: " . print_r($csrf_debug, true), FILE_APPEND);
             $error = "Security validation failed (CSRF mismatch). This can happen if the upload took too long or the session expired. Please try with fewer images or smaller files.";
         }
     // STEP 1: INITIAL SUBMISSION (UPLOAD FILES & SEND OTP)
@@ -104,45 +128,64 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     // Profile Image
                     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-                        $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
-                        if ($upload) {
-                            $profile_image_url = $upload['url'];
-                            $profile_image_public_id = $upload['public_id'];
+                        if ($_FILES['profile_image']['size'] > $upload_max_size_bytes) {
+                            $error = "Profile image exceeds $upload_max_size_mb MB limit.";
+                        } else {
+                            $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
+                            if ($upload) {
+                                $profile_image_url = $upload['url'];
+                                $profile_image_public_id = $upload['public_id'];
+                            }
                         }
                     }
-    
+
                     // Aadhar Photo
-                    if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
-                        $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
-                        if ($upload) {
-                            $aadhar_photo_url = $upload['url'];
-                            $aadhar_photo_public_id = $upload['public_id'];
+                    if (empty($error) && isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
+                        if ($_FILES['aadhar_photo']['size'] > $upload_max_size_bytes) {
+                            $error = "Aadhar photo exceeds $upload_max_size_mb MB limit.";
+                        } else {
+                            $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
+                            if ($upload) {
+                                $aadhar_photo_url = $upload['url'];
+                                $aadhar_photo_public_id = $upload['public_id'];
+                            }
                         }
                     }
-    
+
                     // PAN Photo
-                    if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
-                        $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
-                        if ($upload) {
-                            $pan_photo_url = $upload['url'];
-                            $pan_photo_public_id = $upload['public_id'];
+                    if (empty($error) && isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
+                        if ($_FILES['pan_photo']['size'] > $upload_max_size_bytes) {
+                            $error = "PAN photo exceeds $upload_max_size_mb MB limit.";
+                        } else {
+                            $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
+                            if ($upload) {
+                                $pan_photo_url = $upload['url'];
+                                $pan_photo_public_id = $upload['public_id'];
+                            }
                         }
                     }
-    
+
                     // Signature Photo
-                    if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
-                        $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
-                        if ($upload) {
-                            $signature_photo_url = $upload['url'];
-                            $signature_photo_public_id = $upload['public_id'];
+                    if (empty($error) && isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
+                        if ($_FILES['signature_photo']['size'] > $upload_max_size_bytes) {
+                            $error = "Signature photo exceeds $upload_max_size_mb MB limit.";
+                        } else {
+                            $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
+                            if ($upload) {
+                                $signature_photo_url = $upload['url'];
+                                $signature_photo_public_id = $upload['public_id'];
+                            }
                         }
                     }
     
-                    // Previous Work Images (Multiple)
-                    if (isset($_FILES['previous_work_images'])) {
+                    if (empty($error) && isset($_FILES['previous_work_images'])) {
                         $total_files = count($_FILES['previous_work_images']['name']);
                         for ($i = 0; $i < $total_files; $i++) {
                             if ($_FILES['previous_work_images']['error'][$i] == 0) {
+                                if ($_FILES['previous_work_images']['size'][$i] > $upload_max_size_bytes) {
+                                    $error = "One of the previous work images exceeds $upload_max_size_mb MB limit.";
+                                    break;
+                                }
                                 $upload = $cld->uploadImage($_FILES['previous_work_images']['tmp_name'][$i], CLD_FOLDER_WORKER_PREV_WORK, 'high-res');
                                 if ($upload) {
                                     $previous_work_urls[] = $upload['url'];
@@ -157,6 +200,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     if (empty($aadhar_photo_url) || empty($pan_photo_url) || $profile_image_url == "default.png" || empty($signature_photo_url)) {
                         $error = "Please upload all required photos and documents.";
                     } else {
+                         // Generate UID and OTP
+                        $worker_uid = generateUID($pdo, 'worker');
+                        $otp = rand(100000, 999999);
+                        $_SESSION['register_worker_otp'] = $otp;
+    
                         // All good, save to session
                         $_SESSION['temp_worker'] = [
                             'name' => $name,
@@ -179,15 +227,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             'signature_photo_public_id' => $signature_photo_public_id,
                             'previous_work_images' => $previous_work_images,
                             'previous_work_public_ids' => $previous_work_ids,
-                            'working_location' => $working_location
+                            'working_location' => $working_location,
+                            'worker_uid' => $worker_uid
                         ];
-                        
-                         // Generate OTP
-                        $otp = rand(100000, 999999);
-                        $_SESSION['register_worker_otp'] = $otp;
     
                         // Send OTP via Email
-                        $mail_result = sendOTPEmail($email, $otp, $name);
+                        $mail_result = sendOTPEmail($email, $otp, $name, $worker_uid);
                         
                         if ($mail_result['status']) {
                             $success = "OTP sent to $email. Please check your inbox.";
@@ -210,12 +255,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
              $error = "Session expired. Please register again.";
              $otp_sent = false;
         } elseif ($entered_otp == $_SESSION['register_worker_otp']) {
-            $w = $_SESSION['temp_worker'];
-            
-            $sql = "INSERT INTO workers (name, profile_image, profile_image_public_id, email, password, phone, service_category_id, bio, hourly_rate, status, pin_code, address, adhar_card, aadhar_photo, aadhar_photo_public_id, pan_photo, pan_photo_public_id, signature_photo, signature_photo_public_id, previous_work_images, previous_work_public_ids, working_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            $stmt = $pdo->prepare($sql);
-            
-            if ($stmt->execute([$w['name'], $w['profile_image'], $w['profile_image_public_id'], $w['email'], $w['password'], $w['phone'], $w['service_category_id'], $w['bio'], $w['hourly_rate'], $w['pin_code'], $w['address'], $w['adhar_card'], $w['aadhar_photo'], $w['aadhar_photo_public_id'], $w['pan_photo'], $w['pan_photo_public_id'], $w['signature_photo'], $w['signature_photo_public_id'], $w['previous_work_images'], $w['previous_work_public_ids'], $w['working_location']])) {
+            if ($stmt->execute([$w['name'], $w['profile_image'], $w['profile_image_public_id'], $w['email'], $w['password'], $w['phone'], $w['service_category_id'], $w['bio'], $w['hourly_rate'], $w['pin_code'], $w['address'], $w['adhar_card'], $w['aadhar_photo'], $w['aadhar_photo_public_id'], $w['pan_photo'], $w['pan_photo_public_id'], $w['signature_photo'], $w['signature_photo_public_id'], $w['previous_work_images'], $w['previous_work_public_ids'], $w['working_location'], $w['worker_uid']])) {
                 $success = "Registration successful! Your account is pending approval from admin.";
                 $otp_sent = false; // Show success message with login link
                 
@@ -245,6 +285,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <link rel="stylesheet" href="../assets/css/theme.css">
     <link rel="stylesheet" href="../assets/css/worker_register.css">
     <script src="../assets/js/theme.js"></script>
+    <script src="../assets/js/image_compressor.js"></script>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <style>
         .password-container { position: relative; }
@@ -267,14 +308,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <p class="mb-0">Join us and grow your business</p>
                     </div>
                     <div class="card-body">
-                        <?php if(isset($error)): ?>
+                        <?php if(!empty($error)): ?>
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
-                        <?php if(isset($success)): ?>
-                            <div class="alert alert-success"><?php echo $success; ?> <a href="login.php" class="alert-link">Login here</a></div>
-                        <?php endif; ?>
-                        
-                        <?php if(empty($otp_sent) || $otp_sent == false): ?>
+
+                        <?php if(!empty($success) && empty($otp_sent)): ?>
+                            <div class="text-center py-4">
+                                <div class="mb-4">
+                                    <i class="fas fa-clock fa-5x text-info"></i>
+                                </div>
+                                <h4 class="text-success mb-3">Registration Successful!</h4>
+                                <div class="alert alert-info border-0 shadow-sm mb-4">
+                                    <p class="mb-0"><strong>Your data is pending for verification.</strong></p>
+                                    <p class="small mb-0">Our admin team will review your profile and documents. You will be able to log in once your account is approved.</p>
+                                </div>
+                                <a href="login.php" class="btn btn-warning px-5">Go to Login Page</a>
+                            </div>
+                        <?php elseif(empty($otp_sent) || $otp_sent == false): ?>
                         <form method="POST" action="register.php" enctype="multipart/form-data" id="registerForm">
                             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                             
@@ -284,6 +334,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <div class="col-md-6 mb-3">
                                     <label for="name" class="form-label">Full Name *</label>
                                     <input type="text" class="form-control" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
+                                </div>
+                                <!-- Honeypot Field (Invisible to humans) -->
+                                <div style="display: none;">
+                                    <label for="middle_name">Middle Name</label>
+                                    <input type="text" name="middle_name" id="middle_name" tabindex="-1" autocomplete="off">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="profile_image" class="form-label">Profile Photo * <small class="text-muted">(JPG, PNG)</small></label>
@@ -591,35 +646,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <script>
         // Real-time Validation Helper
         function setupValidation(input, validateFn, errorMsg) {
-            if (!input) return;
+    if (!input) return;
 
-            // Check if error message div already exists
-            let errorDiv = input.parentNode.querySelector('.invalid-feedback-custom');
-            if (!errorDiv) {
-                errorDiv = document.createElement('div');
-                errorDiv.className = 'invalid-feedback invalid-feedback-custom';
-                errorDiv.style.display = 'none';
-                errorDiv.style.color = '#dc3545';
-                errorDiv.style.fontSize = '0.875em';
-                errorDiv.style.marginTop = '0.25rem';
-                input.parentNode.appendChild(errorDiv);
-            }
+    // Check if error message div already exists
+    let errorDiv = input.parentNode.querySelector('.invalid-feedback-custom');
+    if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.className = 'invalid-feedback invalid-feedback-custom';
+        errorDiv.style.display = 'none';
+        errorDiv.style.color = '#dc3545';
+        errorDiv.style.fontSize = '0.875em';
+        errorDiv.style.marginTop = '0.25rem';
+        input.parentNode.appendChild(errorDiv);
+    }
 
-            const validate = () => {
-                const isValid = validateFn(input.value);
-                if (!isValid && input.value !== '') {
-                    input.classList.add('is-invalid');
-                    errorDiv.innerText = errorMsg;
-                    errorDiv.style.display = 'block';
-                } else {
-                    input.classList.remove('is-invalid');
-                    errorDiv.style.display = 'none';
-                }
-            };
-
-            input.addEventListener('input', validate);
-            input.addEventListener('blur', validate);
+    const validate = () => {
+        const isValid = validateFn(input.value);
+        if (!isValid && input.value !== '') {
+            input.classList.add('is-invalid');
+            errorDiv.innerText = errorMsg;
+            errorDiv.style.display = 'block';
+        } else {
+            input.classList.remove('is-invalid');
+            errorDiv.style.display = 'none';
         }
+    };
+
+    input.addEventListener('input', validate);
+    input.addEventListener('blur', validate);
+}
+
 
         document.addEventListener('DOMContentLoaded', function() {
             // 1. Phone Validation
@@ -671,6 +727,58 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             });
 
             observer.observe(container, { childList: true });
+
+            // 5. Global File Size Monitor
+            const updateSizeWarning = () => {
+                let totalBytes = 0;
+                let oversizedFile = false;
+                const individualLimitBytes = 20 * 1024 * 1024; // 20MB
+
+                document.querySelectorAll('input[type="file"]').forEach(fileInput => {
+                    if (fileInput.files && fileInput.files.length > 0) {
+                        Array.from(fileInput.files).forEach(file => {
+                            totalBytes += file.size;
+                            if (file.size > individualLimitBytes) {
+                                oversizedFile = true;
+                            }
+                        });
+                    }
+                });
+
+                const sizeMB = parseFloat((totalBytes / (1024 * 1024)).toFixed(2));
+                const limitMB = 150;
+                let warningDiv = document.getElementById('sizeWarning');
+                if (!warningDiv) {
+                    warningDiv = document.createElement('div');
+                    warningDiv.id = 'sizeWarning';
+                    warningDiv.className = 'alert alert-info mt-3 small';
+                    document.getElementById('registerForm').prepend(warningDiv);
+                }
+
+                if (sizeMB > limitMB) {
+                    warningDiv.className = 'alert alert-danger mt-3 small';
+                    warningDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>Limit Exceeded:</strong> Total upload size is <b>${sizeMB} MB</b>. The server's safety limit is <b>${limitMB} MB</b>. Please reduce the number of photos.`;
+                    document.querySelector('button[name="register_init"]').disabled = true;
+                } else if (oversizedFile) {
+                    warningDiv.className = 'alert alert-danger mt-3 small';
+                    warningDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>File Too Large:</strong> One or more photos exceed <b>20MB</b>. While we compress all photos to 1024px, the initial file must be under 20MB for the server to process it.`;
+                    document.querySelector('button[name="register_init"]').disabled = true;
+                } else {
+                    warningDiv.className = 'alert alert-info mt-3 small';
+                    warningDiv.innerHTML = `<i class="fas fa-magic"></i> <strong>Pro Tip:</strong> You can upload photos of any resolution. We will automatically resize them to <b>1024x1024 px</b> and compress them to under <b>350KB</b> for you! <br> Current total: <b>${sizeMB} MB</b> / ${limitMB} MB limit.`;
+                    document.querySelector('button[name="register_init"]').disabled = false;
+                }
+            };
+
+            // Attach listener to current and future file inputs
+            document.addEventListener('change', function(e) {
+                if (e.target.type === 'file') {
+                    updateSizeWarning();
+                }
+            });
+
+            // --- 6. CLIENT-SIDE IMAGE COMPRESSION ---
+            ImageCompressor.attach('registerForm', 'Optimizing your photos...');
         });
     </script>
 </body>

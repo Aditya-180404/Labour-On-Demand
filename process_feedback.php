@@ -11,6 +11,12 @@ if (!isset($_SESSION['user_id']) && !isset($_SESSION['worker_id'])) {
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     require_once 'includes/captcha.php';
+    
+    // Honeypot check
+    if (!empty($_POST['middle_name'])) {
+        echo json_encode(['status' => 'error', 'message' => 'Bot detected.']);
+        exit;
+    }
 
     // Validate CAPTCHA
     if (!isset($_POST['g-recaptcha-response']) || !verifyCaptcha($_POST['g-recaptcha-response'])) {

@@ -61,19 +61,24 @@ $is_worker_path = strpos($_SERVER['REQUEST_URI'], '/worker/') !== false;
                 <li class="nav-item dropdown ms-lg-2">
                     <a class="nav-link dropdown-toggle bg-primary bg-opacity-10 rounded-pill px-3 py-1 mt-2 mt-lg-0 border border-primary border-opacity-25 shadow-sm d-flex align-items-center gap-2" href="#" role="button" data-bs-toggle="dropdown">
                         <?php 
-                        $worker_img = $path_prefix . "assets/img/default-worker.png"; // Fallback default
-                        if(isset($_SESSION['worker_id'])) {
-                            // Fetch latest image from DB
-                            $stmt = $pdo->prepare("SELECT profile_image FROM workers WHERE id = ?");
+                        $worker_img = $_SESSION['worker_img_cached'] ?? ($path_prefix . "assets/img/default-worker.png");
+                        
+                        if(isset($_SESSION['worker_id']) && (!isset($_SESSION['worker_name']) || !isset($_SESSION['worker_img_cached']))) {
+                            // Fetch latest info from DB
+                            $stmt = $pdo->prepare("SELECT name, profile_image FROM workers WHERE id = ?");
                             $stmt->execute([$_SESSION['worker_id']]);
-                            $db_img = $stmt->fetchColumn();
-                            if($db_img && $db_img != 'default.png') {
-                                // Check if it's a Cloudinary URL or local
-                                if (strpos($db_img, 'http') === 0) {
-                                     $worker_img = $db_img;
-                                } else {
-                                     $worker_img = $path_prefix . "uploads/workers/" . $db_img;
+                            $w_data = $stmt->fetch();
+                            if($w_data) {
+                                $_SESSION['worker_name'] = $w_data['name'];
+                                $db_img = $w_data['profile_image'];
+                                if($db_img && $db_img != 'default.png') {
+                                    if (strpos($db_img, 'http') === 0) {
+                                         $worker_img = $db_img;
+                                    } else {
+                                         $worker_img = $path_prefix . "uploads/workers/" . $db_img;
+                                    }
                                 }
+                                $_SESSION['worker_img_cached'] = $worker_img;
                             }
                         }
                         ?>

@@ -87,8 +87,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
         
         if (in_array($ext, $allowed_img_ext)) {
-            if ($_FILES['profile_image']['size'] > 15 * 1024 * 1024) {
-                $error = "File size exceeds 15MB limit.";
+            if ($_FILES['profile_image']['size'] > 10 * 1024 * 1024) {
+                $error = "File size exceeds 10MB limit.";
             } else {
                 $cld = CloudinaryHelper::getInstance();
                 
@@ -163,6 +163,8 @@ $user = $stmt->fetch();
         .card { border: none; border-radius: 20px; overflow: hidden; }
         .card-header { border-bottom: none; }
     </style>
+    <script src="../assets/js/theme.js"></script>
+    <script src="../assets/js/image_compressor.js"></script>
 </head>
 <body class="bg-body">
     <?php 
@@ -185,7 +187,8 @@ $user = $stmt->fetch();
                             <div class="alert alert-success"><?php echo $success; ?></div>
                         <?php endif; ?>
 
-                        <form action="edit_profile.php" method="POST" enctype="multipart/form-data">
+                        <form action="edit_profile.php" method="POST" enctype="multipart/form-data" id="profileForm">
+                            <div id="sizeWarning"></div>
                             <div class="text-center mb-4">
                                 <?php 
                                     $img_src = $user['profile_image'] && $user['profile_image'] != 'default.png' 
@@ -194,6 +197,7 @@ $user = $stmt->fetch();
                                 ?>
                                 <img src="<?php echo $img_src; ?>" alt="Profile" class="profile-img-preview mb-3">
                                 <div class="mb-3">
+                                    <h5 class="text-muted mb-1">User ID: <span class="text-primary fw-bold font-monospace"><?php echo htmlspecialchars($user['user_uid'] ?? 'Generating...'); ?></span></h5>
                                     <label for="profile_image" class="form-label">Change Profile Picture</label>
                                     <input type="file" class="form-control" id="profile_image" name="profile_image">
                                 </div>
@@ -276,6 +280,27 @@ $user = $stmt->fetch();
             const updateBtn = document.getElementById('updateBtn');
             const passInput = document.getElementById('new_password');
             const passReqs = document.getElementById('pass-reqs');
+            const profileImageInput = document.getElementById('profile_image');
+
+            // File Size Warning
+            profileImageInput.addEventListener('change', function() {
+                const file = this.files[0];
+                if (file) {
+                    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+                    const warningDiv = document.getElementById('sizeWarning');
+                    
+                    if (sizeMB > 30) {
+                        warningDiv.className = 'alert alert-danger mb-3 small';
+                        warningDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> File size is <b>${sizeMB}MB</b>. Infinity Free might block requests over 30MB. Please use files under 10MB.`;
+                    } else if (sizeMB > 0) {
+                        warningDiv.className = 'alert alert-info mb-3 small';
+                        warningDiv.innerHTML = `<i class="fas fa-magic"></i> <strong>Pro Tip:</strong> Any resolution is allowed. We will automatically resize your photo to <b>1024x1024px</b> and compress it to under <b>350KB</b>! <br> Current size: <b>${sizeMB}MB</b>.`;
+                    }
+                }
+            });
+
+            // --- IMAGE COMPRESSION ---
+            ImageCompressor.attach('profileForm', 'Optimizing your profile photo...');
             
             // Password toggle
             document.getElementById('togglePassword').addEventListener('click', function() {

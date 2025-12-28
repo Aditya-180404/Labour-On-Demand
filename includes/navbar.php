@@ -91,19 +91,23 @@ $is_admin_path = strpos($_SERVER['REQUEST_URI'], '/admin/') !== false;
                     <li class="nav-item dropdown ms-lg-3">
                         <a class="nav-link dropdown-toggle bg-white bg-opacity-10 rounded-pill px-3 py-1 mt-2 mt-lg-0 border border-white border-opacity-25 shadow-sm d-flex align-items-center gap-2" href="#" role="button" data-bs-toggle="dropdown">
                             <?php 
-                            // Fetch profile image if not in session or just use a default
-                            $user_img = $path_prefix . "assets/img/default-user.png";
-                            if(isset($_SESSION['user_id'])) {
-                                $stmt = $pdo->prepare("SELECT profile_image FROM users WHERE id = ?");
+                            $user_img = $_SESSION['user_img_cached'] ?? ($path_prefix . "assets/img/default-user.png");
+                            
+                            if(isset($_SESSION['user_id']) && (!isset($_SESSION['user_name']) || !isset($_SESSION['user_img_cached']))) {
+                                $stmt = $pdo->prepare("SELECT name, profile_image FROM users WHERE id = ?");
                                 $stmt->execute([$_SESSION['user_id']]);
-                                $u_img = $stmt->fetchColumn();
-                                if($u_img && $u_img != 'default.png') {
-                                    // Check if it's a Cloudinary URL or local
-                                    if (strpos($u_img, 'http') === 0) {
-                                         $user_img = $u_img;
-                                    } else {
-                                         $user_img = $path_prefix . "uploads/users/" . $u_img;
+                                $u_data = $stmt->fetch();
+                                if($u_data) {
+                                    $_SESSION['user_name'] = $u_data['name'];
+                                    $u_img = $u_data['profile_image'];
+                                    if($u_img && $u_img != 'default.png') {
+                                        if (strpos($u_img, 'http') === 0) {
+                                             $user_img = $u_img;
+                                        } else {
+                                             $user_img = $path_prefix . "uploads/users/" . $u_img;
+                                        }
                                     }
+                                    $_SESSION['user_img_cached'] = $user_img;
                                 }
                             }
                             ?>

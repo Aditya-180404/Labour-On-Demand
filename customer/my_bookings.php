@@ -33,26 +33,26 @@ if (isset($_POST['cancel_booking']) && isset($_POST['booking_id'])) {
 
 // Fetch Active Bookings (Pending, Accepted)
 $active_stmt = $pdo->prepare("
-    SELECT b.*, w.name as worker_name, w.phone as worker_phone, c.name as category_name 
+    SELECT b.*, w.name as worker_name, w.phone as worker_phone, w.worker_uid, c.name as category_name 
     FROM bookings b 
     JOIN workers w ON b.worker_id = w.id 
     LEFT JOIN categories c ON w.service_category_id = c.id
     WHERE b.user_id = ? AND (b.status = 'pending' OR b.status = 'accepted') 
     ORDER BY b.service_date ASC
-");
+    ");
 $active_stmt->execute([$user_id]);
 $active_bookings = $active_stmt->fetchAll();
 
 // Fetch History (Completed, Rejected, Cancelled)
 $history_stmt = $pdo->prepare("
-    SELECT b.*, w.name as worker_name, c.name as category_name, r.id as review_id 
+    SELECT b.*, w.name as worker_name, w.worker_uid, c.name as category_name, r.id as review_id 
     FROM bookings b 
     JOIN workers w ON b.worker_id = w.id 
     LEFT JOIN categories c ON w.service_category_id = c.id
     LEFT JOIN reviews r ON b.id = r.booking_id
     WHERE b.user_id = ? AND (b.status = 'completed' OR b.status = 'rejected' OR b.status = 'cancelled') 
     ORDER BY b.service_date DESC 
-");
+    ");
 $history_stmt->execute([$user_id]);
 $history_bookings = $history_stmt->fetchAll();
 ?>
@@ -135,8 +135,11 @@ $history_bookings = $history_stmt->fetchAll();
                                         </div>
                                     </div>
                                     <div class="col-md-7">
-                                        <h5 class="card-title mb-1"><?php echo htmlspecialchars($booking['category_name']); ?> Service</h5>
-                                        <p class="mb-1 text-muted"><i class="fas fa-user-hard-hat me-2 text-primary"></i><?php echo htmlspecialchars($booking['worker_name']); ?></p>
+                                        <h5 class="card-title mb-1"><?php echo htmlspecialchars($booking['category_name']); ?> Service <small class="text-muted ms-2">#BK-<?php echo $booking['id']; ?></small></h5>
+                                        <p class="mb-1 text-muted">
+                                            <i class="fas fa-user-hard-hat me-2 text-primary"></i><?php echo htmlspecialchars($booking['worker_name']); ?> 
+                                            <span class="badge bg-light text-dark border font-monospace ms-2">ID: <?php echo htmlspecialchars($booking['worker_uid']); ?></span>
+                                        </p>
                                         <p class="mb-0 small"><i class="far fa-clock me-2"></i><?php echo date('h:i A', strtotime($booking['service_time'])); ?> at <span class="text-truncate d-inline-block align-bottom" style="max-width: 250px;"><?php echo htmlspecialchars($booking['address']); ?></span></p>
                                     </div>
                                     <div class="col-md-3 text-md-end mt-3 mt-md-0">
@@ -176,9 +179,10 @@ $history_bookings = $history_stmt->fetchAll();
                                 <li class="list-group-item py-3">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
-                                            <h6 class="mb-1"><?php echo htmlspecialchars($booking['category_name']); ?></h6>
+                                            <h6 class="mb-1"><?php echo htmlspecialchars($booking['category_name']); ?> <small class="text-muted ms-1">#BK-<?php echo $booking['id']; ?></small></h6>
                                             <small class="text-muted d-block mb-1"><i class="far fa-calendar me-1"></i><?php echo date('M d, Y', strtotime($booking['service_date'])); ?></small>
-                                            <small class="text-muted"><i class="fas fa-hard-hat me-1"></i><?php echo htmlspecialchars($booking['worker_name']); ?></small>
+                                            <small class="text-muted d-block"><i class="fas fa-hard-hat me-1"></i><?php echo htmlspecialchars($booking['worker_name']); ?></small>
+                                            <small class="text-muted font-monospace" style="font-size: 0.75rem;">Worker ID: <?php echo htmlspecialchars($booking['worker_uid']); ?></small>
                                         </div>
                                         <span class="badge bg-<?php 
                                             echo match($booking['status']) {

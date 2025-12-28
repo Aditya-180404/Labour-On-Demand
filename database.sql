@@ -13,9 +13,11 @@ CREATE TABLE IF NOT EXISTS `users` (
     `pin_code` VARCHAR(6),
     `address_details` TEXT,
     `location` VARCHAR(100),
+    `profile_image` VARCHAR(255) DEFAULT 'default.png',
     `otp` VARCHAR(6) DEFAULT NULL,
     `otp_expires_at` DATETIME DEFAULT NULL,
     `profile_image_public_id` VARCHAR(255) DEFAULT NULL,
+    `user_uid` VARCHAR(10) UNIQUE DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS `workers` (
     `pending_pan_photo_public_id` VARCHAR(255) DEFAULT NULL,
     `pending_signature_photo_public_id` VARCHAR(255) DEFAULT NULL,
     `doc_update_status` ENUM('approved', 'pending', 'rejected') DEFAULT NULL,
+    `worker_uid` VARCHAR(8) UNIQUE DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`service_category_id`) REFERENCES `categories`(`id`) ON DELETE SET NULL
 );
@@ -82,6 +85,8 @@ CREATE TABLE IF NOT EXISTS `bookings` (
     `booking_longitude` DECIMAL(11, 8),
     `work_proof_images` TEXT DEFAULT NULL,
     `work_done_public_ids` TEXT DEFAULT NULL,
+    `completion_otp` VARCHAR(6) DEFAULT NULL,
+    `completion_otp_expires_at` DATETIME DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE CASCADE
@@ -148,4 +153,15 @@ CREATE TABLE IF NOT EXISTS `feedbacks` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE CASCADE
+);
+
+-- Rate Limiting Table
+CREATE TABLE IF NOT EXISTS `rate_limits` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `ip_address` VARCHAR(45) NOT NULL UNIQUE,
+    `request_count` INT DEFAULT 1,
+    `first_request_at` INT NOT NULL,
+    `blocked_until` INT DEFAULT 0,
+    INDEX (`ip_address`),
+    INDEX (`blocked_until`)
 );

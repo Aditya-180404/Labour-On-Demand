@@ -38,43 +38,41 @@ class CloudinaryHelper {
      * @return array [url, public_id]
      */
     public function uploadImage($file_path, $folder, $type = 'standard') {
-        try {
-            $transformations = [
-                'crop' => 'limit',
-                'fetch_format' => 'auto',
-                'width' => 2560,
-                'height' => 2560,
-                'quality' => 'auto:best'
-            ];
+    try {
+        // Target ~350KB with controlled resolution and aggressive compression
+        $transformations = [
+            'crop'          => 'limit',
+            'fetch_format'  => 'auto',
+            'height'        => 1024,
+            'width'         => 1024,
+            'quality'       => 'auto:eco'
+        ];
 
-            $options = [
-                'folder' => $folder,
-                'transformation' => $transformations,
-                'resource_type' => 'auto',
-                // Use standard limit to enforce 25 megapixels (approx 5000x5000)
-                // This is safer and more compatible than the 'eval' parameter
-                'width' => 5000,
-                'height' => 5000,
-                'crop' => 'limit',
-                'limit_execution_time' => 60
-            ];
+        $options = [
+            'folder'                => $folder,
+            'transformation'        => $transformations,
+            'resource_type'         => 'image',
+            'limit_execution_time'  => 120
+        ];
 
-            $result = $this->cloudinary->uploadApi()->upload($file_path, $options);
+        $result = $this->cloudinary
+            ->uploadApi()
+            ->upload($file_path, $options);
 
-            return [
-                'url' => $result['secure_url'],
-                'public_id' => $result['public_id']
-            ];
-        } catch (Exception $e) {
-            // Detailed logging for the admin/developer
-            error_log("Cloudinary Upload Critical Error: " . $e->getMessage());
-            // Store last error in session or a static var for debugging if needed
-            if (isset($_SESSION)) {
-                $_SESSION['last_cloudinary_error'] = $e->getMessage();
-            }
-            return null;
+        return [
+            'url'       => $result['secure_url'],
+            'public_id' => $result['public_id']
+        ];
+
+    } catch (Exception $e) {
+        error_log("Cloudinary Upload Critical Error: " . $e->getMessage());
+        if (isset($_SESSION)) {
+            $_SESSION['last_cloudinary_error'] = $e->getMessage();
         }
+        return null;
     }
+}
+
 
     /**
      * Get a transformed URL for a public_id

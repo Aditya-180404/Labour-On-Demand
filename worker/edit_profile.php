@@ -105,41 +105,57 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     // Profile Image
     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-        $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
-        if ($upload) {
-            $pending_profile_image_url = $upload['url'];
-            $pending_profile_image_public_id = $upload['public_id'];
-            $has_pending_docs = true;
+        if ($_FILES['profile_image']['size'] > 10 * 1024 * 1024) {
+            $error = "Profile image exceeds 10MB limit.";
+        } else {
+            $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_WORKER_PROFILE, 'high-res');
+            if ($upload) {
+                $pending_profile_image_url = $upload['url'];
+                $pending_profile_image_public_id = $upload['public_id'];
+                $has_pending_docs = true;
+            }
         }
     }
 
     // Aadhar Photo
     if (isset($_FILES['aadhar_photo']) && $_FILES['aadhar_photo']['error'] == 0) {
-        $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
-        if ($upload) {
-            $pending_aadhar_photo_url = $upload['url'];
-            $pending_aadhar_photo_public_id = $upload['public_id'];
-            $has_pending_docs = true;
+        if ($_FILES['aadhar_photo']['size'] > 10 * 1024 * 1024) {
+             $error = "Aadhar photo exceeds 10MB limit.";
+        } else {
+            $upload = $cld->uploadImage($_FILES['aadhar_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'aadhar/', 'high-res');
+            if ($upload) {
+                $pending_aadhar_photo_url = $upload['url'];
+                $pending_aadhar_photo_public_id = $upload['public_id'];
+                $has_pending_docs = true;
+            }
         }
     }
 
     // PAN Photo
     if (isset($_FILES['pan_photo']) && $_FILES['pan_photo']['error'] == 0) {
-        $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
-        if ($upload) {
-            $pending_pan_photo_url = $upload['url'];
-            $pending_pan_photo_public_id = $upload['public_id'];
-            $has_pending_docs = true;
+        if ($_FILES['pan_photo']['size'] > 10 * 1024 * 1024) {
+             $error = "PAN photo exceeds 10MB limit.";
+        } else {
+            $upload = $cld->uploadImage($_FILES['pan_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'pan/', 'high-res');
+            if ($upload) {
+                $pending_pan_photo_url = $upload['url'];
+                $pending_pan_photo_public_id = $upload['public_id'];
+                $has_pending_docs = true;
+            }
         }
     }
 
     // Signature Photo (Required Admin Approval)
     if (isset($_FILES['signature_photo']) && $_FILES['signature_photo']['error'] == 0) {
-        $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
-        if ($upload) {
-            $pending_signature_photo_url = $upload['url'];
-            $pending_signature_photo_public_id = $upload['public_id'];
-            $has_pending_docs = true;
+        if ($_FILES['signature_photo']['size'] > 10 * 1024 * 1024) {
+             $error = "Signature photo exceeds 10MB limit.";
+        } else {
+            $upload = $cld->uploadImage($_FILES['signature_photo']['tmp_name'], CLD_FOLDER_WORKER_DOCS . 'signature/', 'high-res');
+            if ($upload) {
+                $pending_signature_photo_url = $upload['url'];
+                $pending_signature_photo_public_id = $upload['public_id'];
+                $has_pending_docs = true;
+            }
         }
     }
 
@@ -173,6 +189,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
          $total_files = count($_FILES['previous_work_images']['name']);
          for ($i = 0; $i < $total_files; $i++) {
              if ($_FILES['previous_work_images']['error'][$i] == 0) {
+                 if ($_FILES['previous_work_images']['size'][$i] > 10 * 1024 * 1024) {
+                      $error = "One of the previous work images exceeds 10MB limit.";
+                      break;
+                 }
                  $upload = $cld->uploadImage($_FILES['previous_work_images']['tmp_name'][$i], CLD_FOLDER_WORKER_PREV_WORK, 'high-res');
                  if ($upload) {
                      $new_images_urls[] = $upload['url'];
@@ -261,6 +281,8 @@ $worker = $stmt->fetch();
         .card { border: none; border-radius: 20px; overflow: hidden; }
         .card-header { border-bottom: none; }
     </style>
+    <script src="../assets/js/theme.js"></script>
+    <script src="../assets/js/image_compressor.js"></script>
 </head>
 <body class="bg-body">
     <?php 
@@ -283,7 +305,8 @@ $worker = $stmt->fetch();
                             <div class="alert alert-success"><?php echo $success; ?></div>
                         <?php endif; ?>
 
-                        <form action="edit_profile.php" method="POST" enctype="multipart/form-data">
+                        <form action="edit_profile.php" method="POST" enctype="multipart/form-data" id="workerProfileForm">
+                            <div id="sizeWarning"></div>
                             <div class="text-center mb-4">
                                 <?php 
                                     $img_src = $worker['profile_image'] && $worker['profile_image'] != 'default.png' 
@@ -292,6 +315,7 @@ $worker = $stmt->fetch();
                                 ?>
                                 <img src="<?php echo $img_src; ?>" alt="Profile" class="profile-img-preview mb-3">
                                 <div class="mb-3">
+                                    <h5 class="text-muted mb-1">Worker ID: <span class="text-warning fw-bold font-monospace"><?php echo htmlspecialchars($worker['worker_uid'] ?? 'Generating...'); ?></span></h5>
                                     <label for="profile_image" class="form-label">Change Profile Picture</label>
                                     <?php if($worker['pending_profile_image']): ?>
                                         <div class="mb-2"><span class="badge bg-info"><i class="fas fa-clock"></i> New Photo Pending Approval</span></div>
@@ -482,6 +506,29 @@ $worker = $stmt->fetch();
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const form = document.querySelector('form');
+            const fileInputs = document.querySelectorAll('input[type="file"]');
+            
+            // File Size Warning
+            fileInputs.forEach(input => {
+                input.addEventListener('change', function() {
+                    const totalSize = Array.from(document.querySelectorAll('input[type="file"]'))
+                        .reduce((acc, inp) => acc + (inp.files[0]?.size || 0), 0);
+                    const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+                    const warningDiv = document.getElementById('sizeWarning');
+                    
+                    if (sizeMB > 30) {
+                        warningDiv.className = 'alert alert-danger mb-3 small';
+                        warningDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> Total upload size is <b>${sizeMB}MB</b>. Infinity Free might block requests over 30MB. Please use files under 10MB.`;
+                    } else if (sizeMB > 0) {
+                        warningDiv.className = 'alert alert-info mb-3 small';
+                        warningDiv.innerHTML = `<i class="fas fa-magic"></i> <strong>Pro Tip:</strong> Any resolution is allowed. We will automatically resize your photos to <b>1024x1024px</b> and compress them to under <b>350KB</b>! <br> Current total: <b>${sizeMB}MB</b> / 30MB limit.`;
+                    }
+                });
+            });
+
+            // --- IMAGE COMPRESSION ---
+            ImageCompressor.attach('workerProfileForm', 'Optimizing your profile photos...');
+
             const sensitiveFields = document.querySelectorAll('.sensitive-field');
             const otpSection = document.getElementById('otpSection');
             const sendOtpBtn = document.getElementById('sendOtpBtn');

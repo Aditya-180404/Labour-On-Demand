@@ -4,6 +4,7 @@ require_once '../config/db.php';
 
 
 require_once '../includes/mailer.php';
+require_once '../includes/utils.php';
 
 $otp_sent = false;
 $error = "";
@@ -11,6 +12,11 @@ $success = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     require_once '../includes/captcha.php';
+    
+    // Honeypot check
+    if (!empty($_POST['middle_name'])) {
+        die("Bot detected."); // Silent fail for bots
+    }
 
     // Validate CAPTCHA for all POST requests
     if (!isset($_POST['g-recaptcha-response']) || !verifyCaptcha($_POST['g-recaptcha-response'])) {
@@ -47,7 +53,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                  if ($stmt->rowCount() > 0) {
                      $error = "Email already exists.";
                  } else {
-                    // Generate OTP
+                    // Generate UID and OTP
+                    $user_uid = generateUID($pdo, 'user');
                     $otp = rand(100000, 999999);
                     
                     // Store user data and OTP in session
@@ -58,12 +65,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         'phone' => $phone,
                         'pin_code' => $pin_code,
                         'address_details' => $address_details,
-                        'location' => $location
+                        'location' => $location,
+                        'user_uid' => $user_uid
                     ];
                     $_SESSION['register_otp'] = $otp;
                     
                     // Send OTP via Email
-                    $mail_result = sendOTPEmail($email, $otp, $name);
+                    $mail_result = sendOTPEmail($email, $otp, $name, $user_uid);
                     
                     if ($mail_result['status']) {
                         $success = "OTP sent to email: $email. Please check your inbox (and spam folder).";
@@ -88,12 +96,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
              $otp_sent = false;
         } elseif ($entered_otp == $_SESSION['register_otp']) {
             // OTP Valid -> Insert into DB
-            $user_data = $_SESSION['temp_user'];
-            
-            $sql = "INSERT INTO users (name, email, password, phone, pin_code, address_details, location) VALUES (?, ?, ?, ?, ?, ?, ?)";
-            $stmt = $pdo->prepare($sql);
-            
-             if ($stmt->execute([$user_data['name'], $user_data['email'], $user_data['password'], $user_data['phone'], $user_data['pin_code'], $user_data['address_details'], $user_data['location']])) {
+             if ($stmt->execute([$user_data['name'], $user_data['email'], $user_data['password'], $user_data['phone'], $user_data['pin_code'], $user_data['address_details'], $user_data['location'], $user_data['user_uid']])) {
                  // Auto login
                 $_SESSION['user_id'] = $pdo->lastInsertId();
                 $_SESSION['user_name'] = $user_data['name'];
@@ -162,6 +165,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="mb-3">
                                 <label for="name" class="form-label">Full Name *</label>
                                 <input type="text" class="form-control" id="name" name="name" required value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
+                            </div>
+                            <!-- Honeypot Field (Invisible to humans) -->
+                            <div style="display: none;">
+                                <label for="middle_name">Middle Name</label>
+                                <input type="text" name="middle_name" id="middle_name" tabindex="-1" autocomplete="off">
                             </div>
                             <div class="mb-3">
                                 <label for="email" class="form-label">Email Address *</label>

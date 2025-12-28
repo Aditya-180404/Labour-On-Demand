@@ -70,7 +70,12 @@ if (isset($_SESSION['worker_id'])) {
                 <?php else: ?>
                     <p class="small opacity-75 mb-3 text-white-50">Your input helps us improve the platform for all workers.</p>
                     <form id="workerFeedbackForm" class="row g-2">
+                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="sender_type" value="worker">
+                        <!-- Honeypot Field -->
+                        <div style="display: none;">
+                            <input type="text" name="middle_name" tabindex="-1" autocomplete="off">
+                        </div>
                         <div class="col-6">
                             <input type="text" name="name" class="form-control form-control-sm border-0 bg-white bg-opacity-10 text-white" placeholder="Name" value="<?php echo htmlspecialchars($pre_name); ?>" required>
                         </div>

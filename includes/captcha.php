@@ -3,7 +3,8 @@ if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.');
 
 function verifyCaptcha($response) {
     if (empty($response)) {
-        file_put_contents('c:/xampp/htdocs/laubour/captcha_debug.log', date('Y-m-d H:i:s') . " - Empty Response received.\n", FILE_APPEND);
+        // Use a relative path for portability
+        file_put_contents(__DIR__ . '/../captcha_debug.log', date('Y-m-d H:i:s') . " - Empty Response received.\n", FILE_APPEND);
         return false;
     }
     
@@ -25,13 +26,13 @@ function verifyCaptcha($response) {
 
     $verify = curl_exec($ch);
 
-    // Debug Logging
-    $log_file = 'c:/xampp/htdocs/laubour/captcha_debug.log';
+    // Debug Logging (Portable path)
+    $log_file = __DIR__ . '/../captcha_debug.log';
     $log_entry = date('Y-m-d H:i:s') . " - Response len: " . strlen($response) . "\n";
     
     if (curl_errno($ch)) {
         $log_entry .= "Curl Error: " . curl_error($ch) . "\n";
-        file_put_contents($log_file, $log_entry, FILE_APPEND);
+        @file_put_contents($log_file, $log_entry, FILE_APPEND);
         curl_close($ch);
         return false;
     }

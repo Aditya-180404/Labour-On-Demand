@@ -4,9 +4,25 @@ require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/captcha.php';
 
+// If already logged in, go to dashboard
+if (isset($_SESSION['admin_logged_in'])) {
+    header("Location: dashboard.php");
+    exit;
+}
+
+// Secret Key Access Check
+if (!isset($_GET['entry']) || $_GET['entry'] !== '1g2g4g6i3g4g5g56774b') {
+    header("Location: ../"); // Redirect to home page
+    exit;
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Validate CSRF Token
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        $error = "Invalid CSRF token. Please refresh the page and try again.";
+    }
     // Validate CAPTCHA
-    if (!isset($_POST['g-recaptcha-response']) || empty($_POST['g-recaptcha-response'])) {
+    elseif (!isset($_POST['g-recaptcha-response']) || empty($_POST['g-recaptcha-response'])) {
         $error = "Please check the CAPTCHA box.";
     } elseif (!verifyCaptcha($_POST['g-recaptcha-response'])) {
         $error = "CAPTCHA verification failed. Please try again.";
@@ -43,6 +59,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="../assets/css/admin_login.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body>
@@ -57,7 +74,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <?php if(isset($error)): ?>
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
-                        <form action="index.php" method="POST">
+                        <form action="index.php?entry=1g2g4g6i3g4g5g56774b" method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                             <div class="mb-3">
                                 <label for="username" class="form-label">Username</label>
                                 <input type="text" class="form-control" id="username" name="username" required>
@@ -96,6 +114,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             } else {
                 passwordField.setAttribute('type', 'password');
                 icon.classList.replace('fa-eye-slash', 'fa-eye');
+            }
+        });
+
+        // Prevent form submission if CAPTCHA is not checked
+        document.querySelector('form').addEventListener('submit', function(e) {
+            if (document.querySelector('.g-recaptcha')) {
+                var response = grecaptcha.getResponse();
+                if (response.length === 0) {
+                    e.preventDefault();
+                    alert("Please check the CAPTCHA box to verify you are not a robot.");
+                }
             }
         });
     </script>

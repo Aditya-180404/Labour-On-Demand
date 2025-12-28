@@ -116,7 +116,8 @@ $user = $user_stmt->fetch();
                     </div>
                 </div>
             </div>
-            <h1 class="fw-bold mb-2">Hello, <?php echo htmlspecialchars($user['name']); ?>!</h1>
+            <h1 class="fw-bold mb-1">Hello, <?php echo htmlspecialchars($user['name']); ?>!</h1>
+            <div class="mb-3"><span class="badge bg-dark font-monospace opacity-75">User ID: <?php echo htmlspecialchars($user['user_uid']); ?></span></div>
             <p class="opacity-75 mb-4">What help do you need today?</p>
             <div class="d-flex justify-content-center gap-2">
                 <a href="workers.php" class="btn btn-warning rounded-pill px-4 fw-bold">Book a Worker</a>

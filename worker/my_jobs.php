@@ -66,10 +66,11 @@ if (isset($_POST['initiate_completion']) && isset($_POST['booking_id']) && isset
         $error_msg = "Amount received cannot be negative.";
     } else {
         // Verify booking
-        $stmt = $pdo->prepare("SELECT b.id, b.user_id, u.name as user_name, u.email as user_email, w.name as worker_name 
+        $stmt = $pdo->prepare("SELECT b.id, b.user_id, u.name as user_name, u.email as user_email, w.name as worker_name, w.worker_uid, c.name as category_name
                                FROM bookings b 
                                JOIN users u ON b.user_id = u.id 
                                JOIN workers w ON b.worker_id = w.id 
+                               JOIN categories c ON w.service_category_id = c.id
                                WHERE b.id = ? AND b.worker_id = ? AND b.status = 'accepted'");
         $stmt->execute([$booking_id, $worker_id]);
         $booking_data = $stmt->fetch();
@@ -105,7 +106,7 @@ if (isset($_POST['initiate_completion']) && isset($_POST['booking_id']) && isset
             if ($update_stmt->execute([$amount_paid, $proof_images_str, $proof_ids_str, $otp, $expires_at, $booking_id])) {
                 
                 // Send OTP Email
-                $mail_result = sendBookingCompletionOTP($booking_data['user_email'], $otp, $booking_data['user_name'], $booking_data['worker_name']);
+                $mail_result = sendBookingCompletionOTP($booking_data['user_email'], $otp, $booking_data['user_name'], $booking_data['worker_name'], $booking_data['category_name'], $booking_data['worker_uid'], $amount_paid);
                 
                 if ($mail_result['status']) {
                     $success_msg = "Proof uploaded. OTP sent to customer for verification.";
@@ -201,7 +202,7 @@ if (isset($_POST['extend_booking']) && isset($_POST['booking_id']) && isset($_PO
 // Fetch Bookings
 // Pending
 $pending_stmt = $pdo->prepare("
-    SELECT b.*, u.name as user_name, u.phone as user_phone, u.email as user_email 
+    SELECT b.*, u.name as user_name, u.phone as user_phone, u.email as user_email, u.user_uid 
     FROM bookings b 
     JOIN users u ON b.user_id = u.id 
     WHERE b.worker_id = ? AND b.status = 'pending' 
@@ -212,7 +213,7 @@ $pending_bookings = $pending_stmt->fetchAll();
 
 // Upcoming (Accepted)
 $upcoming_stmt = $pdo->prepare("
-    SELECT b.*, u.name as user_name, u.phone as user_phone 
+    SELECT b.*, u.name as user_name, u.phone as user_phone, u.user_uid 
     FROM bookings b 
     JOIN users u ON b.user_id = u.id 
     WHERE b.worker_id = ? AND b.status = 'accepted'
@@ -223,7 +224,7 @@ $upcoming_bookings = $upcoming_stmt->fetchAll();
 
 // Past/Completed/Rejected
 $history_stmt = $pdo->prepare("
-    SELECT b.*, u.name as user_name 
+    SELECT b.*, u.name as user_name, u.user_uid 
     FROM bookings b 
     JOIN users u ON b.user_id = u.id 
     WHERE b.worker_id = ? AND (b.status = 'completed' OR b.status = 'rejected' OR b.status = 'cancelled')
@@ -285,7 +286,9 @@ $history_bookings = $history_stmt->fetchAll();
                                         <div class="row align-items-center">
                                             <div class="col-md-8">
                                                 <h5 class="mb-1 fw-bold"><?php echo htmlspecialchars($booking['user_name']); ?></h5>
-                                                <p class="mb-2 text-muted small"><i class="fas fa-map-marker-alt me-1 text-danger"></i><?php echo htmlspecialchars($booking['address']); ?></p>
+                                                <div class="mb-2"><span class="badge bg-light text-dark border font-monospace small">Customer ID: <?php echo htmlspecialchars($booking['user_uid']); ?></span></div>
+                                                <p class="mb-1 text-muted small"><i class="fas fa-map-marker-alt me-1 text-danger"></i><?php echo htmlspecialchars($booking['address']); ?></p>
+                                                <p class="text-muted small mb-2"><i class="fas fa-hashtag me-1"></i>Booking: <strong>#BK-<?php echo $booking['id']; ?></strong></p>
                                                 <div class="d-flex gap-3 text-sm flex-wrap small fw-bold">
                                                     <span><i class="far fa-calendar me-1"></i><?php echo date('D, M d', strtotime($booking['service_date'])); ?></span>
                                                     <span><i class="far fa-clock me-1"></i><?php echo date('h:i A', strtotime($booking['service_time'])); ?></span>
@@ -343,6 +346,8 @@ $history_bookings = $history_stmt->fetchAll();
                                                 </td>
                                                 <td>
                                                     <div class="fw-bold mb-1"><?php echo htmlspecialchars($booking['user_name']); ?></div>
+                                                    <div class="small mb-1 font-monospace text-muted">ID: <?php echo htmlspecialchars($booking['user_uid']); ?></div>
+                                                    <div class="small mb-1 text-muted"><span class="badge bg-light text-dark border">#BK-<?php echo $booking['id']; ?></span></div>
                                                     <div class="small mb-1 text-muted"><i class="fas fa-location-arrow me-1"></i><?php echo htmlspecialchars(substr($booking['address'],0,30)); ?>...</div>
                                                     <a href="tel:<?php echo htmlspecialchars($booking['user_phone']); ?>" class="btn btn-light btn-sm rounded-pill py-0 px-2 small text-primary border"><i class="fas fa-phone-alt me-1"></i>Call</a>
                                                 </td>
@@ -395,7 +400,7 @@ $history_bookings = $history_stmt->fetchAll();
                                                                     <h5 class="modal-title fw-bold">Job Completion Proof</h5>
                                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                                 </div>
-                                                                <form method="POST" enctype="multipart/form-data">
+                                                                <form method="POST" enctype="multipart/form-data" class="completion-form">
                                                                     <div class="modal-body p-4">
                                                                         <p class="small text-muted mb-3">Upload photos of the work done and enter the amount received. An OTP will be sent to the customer.</p>
                                                                         
@@ -471,7 +476,10 @@ $history_bookings = $history_stmt->fetchAll();
                                 <?php foreach($history_bookings as $booking): ?>
                                     <li class="list-group-item py-3">
                                         <div class="d-flex justify-content-between align-items-center mb-1">
-                                            <h6 class="mb-0 fw-bold"><?php echo htmlspecialchars($booking['user_name']); ?></h6>
+                                            <div>
+                                                <h6 class="mb-0 fw-bold"><?php echo htmlspecialchars($booking['user_name']); ?></h6>
+                                                <small class="text-muted font-monospace" style="font-size: 0.75rem;">ID: <?php echo htmlspecialchars($booking['user_uid']); ?> | #BK-<?php echo $booking['id']; ?></small>
+                                            </div>
                                             <span class="badge bg-<?php 
                                                 echo match($booking['status']) {
                                                     'completed' => 'success',
@@ -502,6 +510,7 @@ $history_bookings = $history_stmt->fetchAll();
     <?php include '../includes/worker_footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="<?php echo $path_prefix; ?>assets/js/theme.js"></script>
+    <script src="<?php echo $path_prefix; ?>assets/js/image_compressor.js"></script>
     <script>
         // Real-time Validation for Job Completion
         document.addEventListener('DOMContentLoaded', function() {
@@ -532,6 +541,9 @@ $history_bookings = $history_stmt->fetchAll();
                 input.addEventListener('input', validate);
                 input.addEventListener('blur', validate);
             });
+
+            // --- IMAGE COMPRESSION FOR JOB COMPLETION ---
+            ImageCompressor.attach('.completion-form', 'Optimizing proof photos...');
         });
     </script>
 </body>

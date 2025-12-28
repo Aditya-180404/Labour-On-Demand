@@ -153,7 +153,10 @@ $income_history = $income_stmt->fetchAll();
             border-radius: 50%; 
             border: 4px solid #fff; /* Revert to white for Admin Theme */
             box-shadow: 0 5px 15px rgba(0,0,0,0.1); 
+            cursor: pointer;
+            transition: transform 0.2s;
         }
+        .worker-img:hover { transform: scale(1.05); }
         
         .status-badge { padding: 8px 16px; border-radius: 50px; font-size: 0.85rem; }
         
@@ -238,11 +241,15 @@ $income_history = $income_stmt->fetchAll();
                             $worker_img = ($worker['profile_image'] && $worker['profile_image'] != 'default.png') 
                                 ? $cld->getUrl($worker['profile_image'], ['width' => 240, 'height' => 240, 'crop' => 'fill', 'gravity' => 'face']) 
                                 : "https://via.placeholder.com/120"; 
+                            $full_profile_img = ($worker['profile_image'] && $worker['profile_image'] != 'default.png') 
+                                ? $cld->getUrl($worker['profile_image_public_id'] ?: $worker['profile_image']) 
+                                : $worker_img;
                         ?>
-                        <img src="<?php echo $worker_img; ?>" class="rounded-circle mb-3 worker-img">
+                        <img src="<?php echo $worker_img; ?>" data-full="<?php echo $full_profile_img; ?>" class="rounded-circle mb-3 worker-img" title="Click to enlarge">
                         <span class="position-absolute bottom-0 end-0 p-2 bg-<?php echo ($worker['is_available'] ? 'success' : 'secondary'); ?> border border-2 border-white rounded-circle"></span>
                     </div>
                     <h3 class="fw-bold mb-1"><?php echo htmlspecialchars($worker['name']); ?></h3>
+                    <div class="mb-1"><span class="badge bg-dark font-monospace opacity-75">ID: <?php echo htmlspecialchars($worker['worker_uid']); ?></span></div>
                     <p class="text-muted"><i class="fas <?php echo $worker['category_icon'] ? $worker['category_icon'] : 'fa-user'; ?> me-2"></i><?php echo htmlspecialchars($worker['category_name']); ?></p>
                     
                     <div class="d-flex justify-content-center gap-2 mb-4">
@@ -356,8 +363,8 @@ $income_history = $income_stmt->fetchAll();
                             <div class="col-md-6 col-lg-3">
                                 <div class="p-2 border rounded bg-body small">
                                     <span class="d-block mb-1 fw-bold">New Photo</span>
-                                    <img src="<?php echo $worker['pending_profile_image']; ?>" class="rounded-circle mb-2" style="width: 50px; height: 50px; object-fit: cover;">
-                                    <a href="<?php echo $worker['pending_profile_image']; ?>" target="_blank" class="d-block tiny text-decoration-none">View Full</a>
+                                    <img src="<?php echo $worker['pending_profile_image']; ?>" data-full="<?php echo $worker['pending_profile_image']; ?>" class="rounded-circle mb-2 shadow-sm" style="width: 50px; height: 50px; object-fit: cover; cursor: pointer;" title="Click to enlarge">
+                                    <span class="d-block tiny text-muted">Click image to view</span>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -366,7 +373,7 @@ $income_history = $income_stmt->fetchAll();
                                 <div class="p-2 border rounded bg-body small">
                                     <span class="d-block mb-1 fw-bold">New Aadhar</span>
                                     <i class="fas fa-id-card text-primary mb-2"></i><br>
-                                    <a href="<?php echo $worker['pending_aadhar_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
+                                    <a href="<?php echo $worker['pending_aadhar_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review Document</a>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -375,7 +382,7 @@ $income_history = $income_stmt->fetchAll();
                                 <div class="p-2 border rounded bg-body small">
                                     <span class="d-block mb-1 fw-bold">New PAN</span>
                                     <i class="fas fa-id-card text-danger mb-2"></i><br>
-                                    <a href="<?php echo $worker['pending_pan_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
+                                    <a href="<?php echo $worker['pending_pan_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review Document</a>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -384,7 +391,7 @@ $income_history = $income_stmt->fetchAll();
                                 <div class="p-2 border rounded bg-body small">
                                     <span class="d-block mb-1 fw-bold">New Signature</span>
                                     <i class="fas fa-file-signature text-secondary mb-2"></i><br>
-                                    <a href="<?php echo $worker['pending_signature_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review</a>
+                                    <a href="<?php echo $worker['pending_signature_photo']; ?>" target="_blank" class="tiny text-decoration-none">Review Document</a>
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -431,14 +438,20 @@ $income_history = $income_stmt->fetchAll();
                             <hr class="my-4">
                             <label class="text-muted small fw-bold text-uppercase mb-3 d-block">Portfolio / Previous Work</label>
                             <div class="row g-2">
-                                <?php foreach(explode(',', $worker['previous_work_images']) as $img_url): 
+                                <?php 
+                                $port_imgs = explode(',', $worker['previous_work_images'] ?? '');
+                                $port_pids = explode(',', $worker['previous_work_public_ids'] ?? '');
+                                
+                                foreach($port_imgs as $index => $img_url): 
                                     if (empty(trim($img_url))) continue;
-                                    $thumb = $cld->getUrl(trim($img_url), ['width' => 400, 'height' => 300, 'crop' => 'fill']);
+                                    
+                                    // Use public ID for better Cloudinary transformations if available
+                                    $pid = isset($port_pids[$index]) ? trim($port_pids[$index]) : trim($img_url);
+                                    $thumb = $cld->getUrl($pid, ['width' => 400, 'height' => 300, 'crop' => 'fill']);
+                                    $full_url = $cld->getUrl($pid); // Get high-res URL for lightbox
                                 ?>
                                     <div class="col-md-4 col-lg-3">
-                                        <a href="#" onclick="openLightbox('<?php echo trim($img_url); ?>'); return false;">
-                                            <img src="<?php echo $thumb; ?>" class="img-fluid rounded border shadow-sm w-100" style="height: 120px; object-fit: cover; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                                        </a>
+                                        <img src="<?php echo $thumb; ?>" data-full="<?php echo $full_url; ?>" class="img-fluid rounded border shadow-sm w-100" style="height: 120px; object-fit: cover; transition: transform 0.2s; cursor: pointer;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'" onerror="this.src='https://via.placeholder.com/400x300?text=Image+Not+Found'" title="Click to enlarge">
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -459,9 +472,11 @@ $income_history = $income_stmt->fetchAll();
                                                 <?php if (strtolower(pathinfo($worker['aadhar_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
                                                     <a href="<?php echo $worker['aadhar_photo']; ?>" target="_blank" class="btn btn-sm btn-outline-danger w-100 mt-1"><i class="fas fa-file-pdf me-1"></i> View PDF</a>
                                                 <?php else: ?>
-                                                    <a href="#" onclick="openLightbox('<?php echo $worker['aadhar_photo']; ?>'); return false;">
-                                                        <img src="<?php echo $cld->getUrl($worker['aadhar_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
-                                                    </a>
+                                                    <?php 
+                                                        $aadhar_full = $cld->getUrl($worker['aadhar_photo_public_id'] ?: $worker['aadhar_photo']);
+                                                        $aadhar_thumb = $cld->getUrl($worker['aadhar_photo_public_id'] ?: $worker['aadhar_photo'], ['width' => 400]);
+                                                    ?>
+                                                    <img src="<?php echo $aadhar_thumb; ?>" data-full="<?php echo $aadhar_full; ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;" title="Click to enlarge">
                                                 <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted small">Not provided</span>
@@ -477,9 +492,11 @@ $income_history = $income_stmt->fetchAll();
                                                 <?php if (strtolower(pathinfo($worker['pan_photo'], PATHINFO_EXTENSION)) == 'pdf'): ?>
                                                     <a href="<?php echo $worker['pan_photo']; ?>" target="_blank" class="btn btn-sm btn-outline-danger w-100 mt-1"><i class="fas fa-file-pdf me-1"></i> View PDF</a>
                                                 <?php else: ?>
-                                                    <a href="#" onclick="openLightbox('<?php echo $worker['pan_photo']; ?>'); return false;">
-                                                        <img src="<?php echo $cld->getUrl($worker['pan_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
-                                                    </a>
+                                                    <?php 
+                                                        $pan_full = $cld->getUrl($worker['pan_photo_public_id'] ?: $worker['pan_photo']);
+                                                        $pan_thumb = $cld->getUrl($worker['pan_photo_public_id'] ?: $worker['pan_photo'], ['width' => 400]);
+                                                    ?>
+                                                    <img src="<?php echo $pan_thumb; ?>" data-full="<?php echo $pan_full; ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;" title="Click to enlarge">
                                                 <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted small">Not provided</span>
@@ -492,9 +509,11 @@ $income_history = $income_stmt->fetchAll();
                                         <div class="mb-3">
                                             <small class="text-muted d-block">Signature</small>
                                             <?php if ($worker['signature_photo']): ?>
-                                                <a href="#" onclick="openLightbox('<?php echo $worker['signature_photo']; ?>'); return false;">
-                                                    <img src="<?php echo $cld->getUrl($worker['signature_photo'], ['width' => 400]); ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;">
-                                                </a>
+                                                <?php 
+                                                    $sig_full = $cld->getUrl($worker['signature_photo_public_id'] ?: $worker['signature_photo']);
+                                                    $sig_thumb = $cld->getUrl($worker['signature_photo_public_id'] ?: $worker['signature_photo'], ['width' => 400]);
+                                                ?>
+                                                <img src="<?php echo $sig_thumb; ?>" data-full="<?php echo $sig_full; ?>" class="img-fluid rounded border mt-1 shadow-sm" style="max-height: 100px; cursor: pointer;" title="Click to enlarge">
                                             <?php else: ?>
                                                 <span class="text-muted small">Not provided</span>
                                             <?php endif; ?>
@@ -529,13 +548,13 @@ $income_history = $income_stmt->fetchAll();
                                         <tr>
                                             <td><span class="badge bg-secondary text-uppercase"><?php echo $h['photo_type']; ?></span></td>
                                             <td>
-                                                <a href="<?php echo $h['photo_path']; ?>" target="_blank" class="text-decoration-none">
-                                                    <?php if (strtolower(pathinfo($h['photo_path'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                <?php if (strtolower(pathinfo($h['photo_path'], PATHINFO_EXTENSION)) == 'pdf'): ?>
+                                                    <a href="<?php echo $h['photo_path']; ?>" target="_blank" class="text-decoration-none">
                                                         <i class="fas fa-file-pdf me-1"></i> PDF Document
-                                                    <?php else: ?>
-                                                        <img src="<?php echo $cld->getUrl($h['photo_path'], ['width' => 100, 'height' => 100, 'crop' => 'thumb']); ?>" class="rounded border shadow-sm" style="width: 50px; height: 50px; object-fit: cover;">
-                                                    <?php endif; ?>
-                                                </a>
+                                                    </a>
+                                                <?php else: ?>
+                                                    <img src="<?php echo $cld->getUrl($h['photo_path'], ['width' => 100, 'height' => 100, 'crop' => 'thumb']); ?>" data-full="<?php echo $cld->getUrl($h['photo_public_id'] ?: $h['photo_path']); ?>" class="rounded border shadow-sm" style="width: 50px; height: 50px; object-fit: cover; cursor: pointer;" title="Click to enlarge">
+                                                <?php endif; ?>
                                             </td>
                                             <td><small class="text-muted"><?php echo date('M d, Y h:i A', strtotime($h['replaced_at'])); ?></small></td>
                                         </tr>
@@ -581,25 +600,6 @@ $income_history = $income_stmt->fetchAll();
             }
         });
     </script>
-    <!-- Image Lightbox Modal -->
-    <div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content bg-transparent border-0 shadow-none">
-                <div class="modal-body p-0 text-center position-relative">
-                    <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-3 z-3" data-bs-dismiss="modal" aria-label="Close"></button>
-                    <img id="lightboxImage" src="" class="img-fluid rounded-3 shadow-lg" style="max-height: 90vh;">
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Lightbox Function
-        function openLightbox(src) {
-            document.getElementById('lightboxImage').src = src;
-            var myModal = new bootstrap.Modal(document.getElementById('imageModal'));
-            myModal.show();
-        }
-
-        // Set Active Link in Sidebar
+    <?php include '../includes/lightbox.php'; ?>
+</body>
 </html>

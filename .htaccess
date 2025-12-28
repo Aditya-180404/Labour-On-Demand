@@ -1,34 +1,104 @@
-# Disable directory browsing
+############################################
+# Core Settings
+############################################
+
+# Disable directory listing
 Options -Indexes
 
-# Limit request body size to 100MB
-LimitRequestBody 104857600
+# Protect .htaccess itself
+<Files ".htaccess">
+Require all denied
+</Files>
 
-# Increase PHP upload limits (if allowed by server config)
-<IfModule mod_php7.c>
-    php_value upload_max_filesize 100M
-    php_value post_max_size 100M
-    php_value memory_limit 256M
+############################################
+# Rewrite Engine
+############################################
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# ------------------------------------------
+# Force HTTPS (Cloudflare + Proxy aware)
+# ------------------------------------------
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# ------------------------------------------
+# Force www (optional — remove if not needed)
+# ------------------------------------------
+# RewriteCond %{HTTP_HOST} !^www\. [NC]
+# RewriteRule ^ https://www.%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# ------------------------------------------
+# Block malicious bots
+# ------------------------------------------
+RewriteCond %{HTTP_USER_AGENT} (Baiduspider|HTTrack|YandexBot|AhrefsBot|DotBot|MJ12bot|SemrushBot) [NC]
+RewriteRule .* - [F,L]
+
 </IfModule>
 
+############################################
+# Security Headers
+############################################
+<IfModule mod_headers.c>
+
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set X-XSS-Protection "1; mode=block"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+
+# Enable HSTS (ONLY after SSL works perfectly)
+# Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+</IfModule>
+
+############################################
+# Block Sensitive Files
+############################################
+<FilesMatch "\.(env|ini|log|sql|bak|lock|json|md)$">
+Require all denied
+</FilesMatch>
+
+############################################
+# PHP Hardening
+############################################
 <IfModule mod_php.c>
-    php_value upload_max_filesize 100M
-    php_value post_max_size 100M
-    php_value memory_limit 256M
+php_flag display_errors Off
+php_flag expose_php Off
 </IfModule>
 
-# Block access to sensitive files
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+# Upload Limits & Timeouts
+php_value upload_max_filesize 20M
+php_value post_max_size 150M
+php_value max_file_uploads 30
+php_value max_input_time 300
+php_value max_execution_time 300
 
-<FilesMatch "^(composer\.json|composer\.lock|package\.json|package-lock\.json)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+# Limit cloud upload endpoint to 350KB (max resolution 1700x1700px)
+<DirectoryMatch "/cloudinary|/upload_cloud">
+    LimitRequestBody 358400
+</DirectoryMatch>
 
-<FilesMatch "\.(sql|log|ini|env|md)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+############################################
+# Compression
+############################################
+<IfModule mod_deflate.c>
+AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css application/javascript application/json
+</IfModule>
+
+############################################
+# Browser Caching
+############################################
+<IfModule mod_expires.c>
+ExpiresActive On
+ExpiresDefault "access plus 1 month"
+
+ExpiresByType image/jpeg "access plus 1 year"
+ExpiresByType image/png  "access plus 1 year"
+ExpiresByType image/webp "access plus 1 year"
+ExpiresByType image/svg+xml "access plus 1 year"
+
+ExpiresByType text/css "access plus 1 month"
+ExpiresByType application/javascript "access plus 1 month"
+</IfModule>

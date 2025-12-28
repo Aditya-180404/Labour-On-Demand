@@ -82,17 +82,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     if (empty($date) || empty($time) || empty($address)) {
         $booking_error = "Please fill all booking details.";
     } else {
-        // Enforce booking time restriction (10 PM to 8 AM)
-        $booking_hour = (int)date('H', strtotime($time));
-        if ($booking_hour < 8 || $booking_hour >= 22) {
-            $_SESSION['toast_error'] = "Workers cannot be booked between 10:00 PM and 08:00 AM. Please choose a time within working hours (8 AM - 10 PM).";
-            header("Location: worker_profile.php?id=" . $worker_id);
-            exit;
-        }
         // Calculate end time (1 hour by default)
         $start_timestamp = strtotime("$date $time");
         $end_timestamp = $start_timestamp + 3600; // +1 hour
         $end_time = date('H:i:s', $end_timestamp);
+        $now = time();
+
+        // 1. Check if booking is in the past
+        if ($start_timestamp < ($now - 60)) { // 1 min buffer for server lag
+            $_SESSION['toast_error'] = "You cannot book a worker for a past date or time.";
+            header("Location: worker_profile.php?id=" . $worker_id);
+            exit;
+        }
+
+        // 2. Enforce working session restriction (9 PM to 8 AM)
+        $start_hour = (int)date('H', $start_timestamp);
+        $end_hour = (int)date('H', $end_timestamp);
+        $end_min = (int)date('i', $end_timestamp);
+
+        if ($start_hour < 8 || ($end_hour >= 21 && ($end_hour > 21 || $end_min > 0))) {
+            $_SESSION['toast_error'] = "Any worker cannot be booked between 9 PM to 8 AM. Please choose a shift within working hours (8 AM - 9 PM).";
+            header("Location: worker_profile.php?id=" . $worker_id);
+            exit;
+        }
         
         // Check for overlaps
         $overlap_stmt = $pdo->prepare("
@@ -118,24 +130,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
             $sql = "INSERT INTO bookings (user_id, worker_id, service_date, service_time, service_end_time, address, booking_latitude, booking_longitude, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')";
             $stmt = $pdo->prepare($sql);
             if ($stmt->execute([$user_id, $worker_id, $date, $time, $end_time, $address, $lat, $lng])) {
-                // Fetch user name
-                $u_stmt = $pdo->prepare("SELECT name FROM users WHERE id = ?");
+                // Fetch user info including UID
+                $u_stmt = $pdo->prepare("SELECT name, user_uid FROM users WHERE id = ?");
                 $u_stmt->execute([$user_id]);
-                $u_name = $u_stmt->fetchColumn(); 
+                $u_data = $u_stmt->fetch();
+                $u_name = $u_data['name'];
+                $user_uid = $u_data['user_uid'];
 
                 $subject = "New Booking Request - Labour On Demand";
                 $message = "
                     <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
                         <h2 style='color: #fd7e14;'>New Job Request!</h2>
                         <p>Hello <strong>{$worker['name']}</strong>,</p>
-                        <p>You have received a new booking request from customer <strong>$u_name</strong>.</p>
+                        <p>You have received a new booking request from customer <strong>$u_name</strong> (ID: <strong>$user_uid</strong>).</p>
                         <ul>
                             <li><strong>Date:</strong> $date</li>
                             <li><strong>Time:</strong> $time</li>
                             <li><strong>Location:</strong> $address</li>
                         </ul>
                         <p>Please login to your dashboard to <strong>Accept</strong> or <strong>Reject</strong> this job.</p>
-                        <a href='http://" . $_SERVER['HTTP_HOST'] . str_replace('customer/worker_profile.php', '', $_SERVER['PHP_SELF']) . "worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
+                        <a href='" . getBaseUrl() . "worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -211,10 +225,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                             }
                         ?>
                         <h2 class="mb-1"><?php echo htmlspecialchars($worker['name']); ?></h2>
-                        <div class="mb-2">
+                        <div class="mb-2 d-flex flex-wrap justify-content-center gap-2">
                             <span class="badge bg-body-tertiary text-body shadow-sm">
                                 <i class="fas <?php echo $worker['category_icon'] ? $worker['category_icon'] : 'fa-user'; ?> me-2 text-warning"></i>
                                 <?php echo htmlspecialchars($worker['category_name']); ?>
+                            </span>
+                            <span class="badge bg-dark text-white shadow-sm font-monospace">
+                                ID: <?php echo htmlspecialchars($worker['worker_uid']); ?>
                             </span>
                         </div>
                         <div class="mt-2">
@@ -334,7 +351,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Select Time</label>
-                            <input type="time" name="time" class="form-control rounded-pill px-3" required>
+                            <input type="time" name="time" class="form-control rounded-pill px-3" min="08:00" max="20:00" required>
+                            <div class="form-text small opacity-75">Work sessions must be between 8 AM and 9 PM.</div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Service Location</label>
@@ -342,7 +360,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                                 <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="useRegisteredAddress()">
                                     <i class="fas fa-home me-1"></i> Use Registered Address
                                 </button>
-                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill" onclick="useCurrentLocation()">
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill" onclick="useCurrentLocation(event)">
                                     <i class="fas fa-location-arrow me-1"></i> Send Current GPS Location
                                 </button>
                             </div>
@@ -362,49 +380,67 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-    <script>
-        // Use Registered Address
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function useRegisteredAddress() {
             const registeredAddress = <?php echo json_encode($user_address); ?>;
-            document.getElementById('addressField').value = registeredAddress;
-            document.getElementById('latField').value = "";
-            document.getElementById('lngField').value = "";
-            document.getElementById('locationStatus').innerHTML = "<i class='fas fa-check text-success'></i> Using registered address";
+            document.getElementById('address').value = registeredAddress;
+            document.getElementById('latitude').value = "";
+            document.getElementById('longitude').value = "";
+            // alert("Using registered address");
         }
 
-        function useCurrentLocation() {
-            const status = document.getElementById('locationStatus');
-            status.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Getting location...";
+        function useCurrentLocation(event) {
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Getting location...";
+            btn.disabled = true;
 
             if (!navigator.geolocation) {
-                status.innerHTML = "<i class='fas fa-exclamation-triangle text-danger'></i> Geolocation not supported by your browser";
+                alert("Geolocation not supported by your browser");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             } else {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
                         const lat = position.coords.latitude;
                         const lng = position.coords.longitude;
-                        document.getElementById('latField').value = lat;
-                        document.getElementById('lngField').value = lng;
+                        const accuracy = position.coords.accuracy;
+                        document.getElementById('latitude').value = lat;
+                        document.getElementById('longitude').value = lng;
                         
-                        // Optionally fetch address from lat/lng using reverse geocoding
-                        // For now, just set a placeholder and let user refine
-                        if (document.getElementById('addressField').value === "") {
-                            document.getElementById('addressField').value = "GPS Location Shared (" + lat.toFixed(6) + ", " + lng.toFixed(6) + ")";
+                        // Set address field
+                        const addrField = document.getElementById('address');
+                        if (addrField.value === "" || addrField.value.includes("GPS Location Shared")) {
+                            addrField.value = "GPS Location Shared (" + lat.toFixed(6) + ", " + lng.toFixed(6) + ")";
                         }
-                        status.innerHTML = "<i class='fas fa-check text-success'></i> GPS Coordinates captured!";
+                        
+                        // Update button style and provide verification link
+                        btn.innerHTML = "<i class='fas fa-check'></i> Location Captured (<a href='https://www.google.com/maps?q=" + lat + "," + lng + "' target='_blank' class='text-white text-decoration-underline'>Verify on Map</a>)";
+                        btn.classList.replace('btn-outline-success', 'btn-success');
+                        
+                        if (accuracy > 100) {
+                            const warningMsg = document.createElement('div');
+                            warningMsg.className = 'alert alert-info mt-2 small p-2';
+                            warningMsg.innerHTML = "<i class='fas fa-info-circle'></i> <strong>Low Accuracy:</strong> Your location is accurate within " + Math.round(accuracy) + " meters. Please check the map or enter your full address manually.";
+                            btn.parentNode.appendChild(warningMsg);
+                        }
                     },
                     (error) => {
-                        status.innerHTML = "<i class='fas fa-exclamation-triangle text-danger'></i> Error: " + error.message;
+                        let msg = "Error: " + error.message;
+                        if (error.code === 1) msg = "Permission denied. Please allow location access.";
+                        alert(msg);
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
                     }
                 );
             }
         }
     </script>
     <?php include '../includes/footer.php'; ?>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

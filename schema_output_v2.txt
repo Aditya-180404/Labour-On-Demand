@@ -1,0 +1,82 @@
+
+--- SCHEMA CHECK ---
+Current Database: labour_on_demand
+
+Tables in the database:
+- admin
+- bookings
+- categories
+- feedbacks
+- reviews
+- users
+- worker_photo_history
+- workers
+
+Columns in 'users':
+- id (int(11))
+- name (varchar(100))
+- profile_image (varchar(255))
+- email (varchar(100))
+- password (varchar(255))
+- phone (varchar(15))
+- pin_code (varchar(6))
+- address_details (text)
+- location (varchar(100))
+- created_at (timestamp)
+- otp (varchar(6))
+- otp_expires_at (datetime)
+- profile_image_public_id (varchar(255))
+
+Columns in 'workers':
+- id (int(11))
+- name (varchar(100))
+- profile_image (varchar(255))
+- email (varchar(100))
+- password (varchar(255))
+- phone (varchar(15))
+- service_category_id (int(11))
+- bio (text)
+- hourly_rate (decimal(10,2))
+- latitude (decimal(10,8))
+- longitude (decimal(11,8))
+- is_available (tinyint(1))
+- status (enum('pending','approved','rejected'))
+- pin_code (text)
+- address (text)
+- adhar_card (varchar(12))
+- aadhar_photo (varchar(255))
+- pan_photo (varchar(255))
+- working_location (varchar(100))
+- created_at (timestamp)
+- pending_profile_image (varchar(255))
+- pending_aadhar_photo (varchar(255))
+- pending_pan_photo (varchar(255))
+- doc_update_status (enum('none','pending','approved','rejected'))
+- signature_photo (varchar(255))
+- previous_work_images (text)
+- otp (varchar(6))
+- otp_expires_at (datetime)
+- pending_signature_photo (varchar(255))
+- profile_image_public_id (varchar(255))
+- aadhar_photo_public_id (varchar(255))
+- pan_photo_public_id (varchar(255))
+- signature_photo_public_id (varchar(255))
+- previous_work_public_ids (text)
+- pending_profile_image_public_id (varchar(255))
+- pending_aadhar_photo_public_id (varchar(255))
+- pending_pan_photo_public_id (varchar(255))
+- pending_signature_photo_public_id (varchar(255))
+
+Columns in 'feedbacks':
+- id (int(11))
+- user_id (int(11))
+- worker_id (int(11))
+- sender_role (enum('user','worker','guest'))
+- name (varchar(255))
+- email (varchar(255))
+- subject (varchar(255))
+- message (text)
+- status (enum('pending','replied'))
+- created_at (timestamp)
+- admin_reply (text)
+- replied_at (timestamp)

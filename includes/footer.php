@@ -74,6 +74,10 @@ if (isset($_SESSION['user_id'])) {
                     <form id="feedbackForm" class="row g-2">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <input type="hidden" name="sender_type" value="customer">
+                        <!-- Honeypot Field -->
+                        <div style="display: none;">
+                            <input type="text" name="middle_name" tabindex="-1" autocomplete="off">
+                        </div>
                         <div class="col-6">
                             <input type="text" name="name" class="form-control form-control-sm bg-body" placeholder="Your Name" value="<?php echo htmlspecialchars($pre_name); ?>" required>
                         </div>

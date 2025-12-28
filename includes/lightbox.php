@@ -43,18 +43,21 @@
     position: absolute;
     top: 20px;
     right: 30px;
-    background: none;
+    background: rgba(255, 255, 255, 0.1);
     border: none;
     color: white;
     font-size: 50px;
     cursor: pointer;
-    line-height: 1;
-    transition: transform 0.2s;
+    line-height: 0.8;
+    padding: 0 10px 10px 10px;
+    border-radius: 50%;
+    transition: all 0.2s;
     user-select: none;
     z-index: 100000;
 }
 
 .lightbox-close:hover {
+    background: rgba(255, 255, 255, 0.2);
     transform: scale(1.1);
     color: #ffc107;
 }
@@ -89,9 +92,10 @@ body.lightbox-open {
         // Target images that aren't inside the lightbox already
         if (target.tagName === 'IMG' && !target.closest('.lightbox-overlay')) {
             // Optional: Exclude very small images (icons/avatars in nav)
-            if (target.naturalWidth < 50 && target.naturalHeight < 50) return;
+            if (target.naturalWidth < 40 && target.naturalHeight < 40) return;
             
-            openLightbox(target.src);
+            const fullSrc = target.getAttribute('data-full') || target.src;
+            openLightbox(fullSrc);
         }
     });
 

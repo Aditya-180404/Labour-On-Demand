@@ -108,6 +108,7 @@ $next_job = $next_job_stmt->fetch();
             ?>
             <img src="<?php echo $img_src; ?>" class="rounded-circle mb-3 worker-avatar" alt="Profile">
             <h2 class="fw-bold mb-1">Welcome, <?php echo htmlspecialchars($worker['name']); ?></h2>
+            <div class="mb-3"><span class="badge bg-dark font-monospace opacity-75">Worker ID: <?php echo htmlspecialchars($worker['worker_uid']); ?></span></div>
             <p class="opacity-75 mb-3"><?php echo htmlspecialchars($worker['bio'] ?: ''); ?></p>
             <div class="d-flex justify-content-center gap-2">
                 <a href="edit_profile.php" class="btn btn-warning rounded-pill px-4 fw-bold shadow-sm">Edit Profile</a>

@@ -313,6 +313,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         setupPasswordChecker('password', '');
         setupPasswordChecker('new_password', 'reset-');
+
+        // Prevent form submission if CAPTCHA is not checked
+        document.querySelector('form').addEventListener('submit', function(e) {
+            if (document.querySelector('.g-recaptcha')) {
+                var response = grecaptcha.getResponse();
+                if (response.length === 0) {
+                    e.preventDefault();
+                    alert("Please check the CAPTCHA box to verify you are not a robot.");
+                }
+            }
+        });
     </script>
 </body>
 </html>

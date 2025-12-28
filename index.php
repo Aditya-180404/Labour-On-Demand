@@ -208,7 +208,7 @@ require_once 'config/db.php';
                         <div class="card category-card text-center h-100 border-0 shadow-sm">
                             <div class="card-body">
                                 <i class="fas <?php echo $cat['icon']; ?> fa-3x mb-3 text-primary"></i>
-                                <h5 class="card-title text-body"><?php echo $cat['name']; ?></h5>
+                                <h5 class="card-title text-body"><?php echo htmlspecialchars($cat['name']); ?></h5>
                             </div>
                         </div>
                     </a>
@@ -257,6 +257,7 @@ require_once 'config/db.php';
         </div>
     </section>
 
+    <?php include 'includes/stats_animation.php'; ?>
     <?php include 'includes/footer.php'; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -295,18 +296,27 @@ require_once 'config/db.php';
         }
         */
         
-        // Parallax Effect on Mouse Move
+        // Optimized Parallax Effect with requestAnimationFrame
+        let mouseX = 0, mouseY = 0;
+        let ticking = false;
+
         document.addEventListener('mousemove', (e) => {
-            const parallaxLayers = document.querySelectorAll('.parallax-layer');
-            const mouseX = e.clientX / window.innerWidth;
-            const mouseY = e.clientY / window.innerHeight;
+            mouseX = e.clientX / window.innerWidth;
+            mouseY = e.clientY / window.innerHeight;
             
-            parallaxLayers.forEach((layer, index) => {
-                const speed = (index + 1) * 5;
-                const x = (mouseX - 0.5) * speed;
-                const y = (mouseY - 0.5) * speed;
-                layer.style.transform = `translate(${x}px, ${y}px)`;
-            });
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    const parallaxLayers = document.querySelectorAll('.parallax-layer');
+                    parallaxLayers.forEach((layer, index) => {
+                        const speed = (index + 1) * 5;
+                        const x = (mouseX - 0.5) * speed;
+                        const y = (mouseY - 0.5) * speed;
+                        layer.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+                    });
+                    ticking = false;
+                });
+                ticking = true;
+            }
         });
     </script>
 </body>
