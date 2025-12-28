@@ -98,7 +98,11 @@ require_once 'config/db.php';
     </style>
 <body>
     
-    <?php include 'includes/navbar.php'; ?>
+
+    <?php 
+    $path_prefix = '';
+    include 'includes/navbar.php'; 
+    ?>
 
     <header class="hero-section text-center d-flex align-items-center justify-content-center">
         <!-- SVG Animation Background (Theme Aware) -->

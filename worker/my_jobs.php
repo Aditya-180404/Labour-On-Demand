@@ -248,7 +248,10 @@ $history_bookings = $history_stmt->fetchAll();
 </head>
 <body>
 
-    <?php include '../includes/worker_navbar.php'; ?>
+    <?php 
+    $path_prefix = '../';
+    include '../includes/worker_navbar.php'; 
+    ?>
 
     <div class="page-header">
         <div class="container text-center text-md-start">
@@ -498,7 +501,7 @@ $history_bookings = $history_stmt->fetchAll();
 
     <?php include '../includes/worker_footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="<?php echo BASE_URL; ?>/assets/js/theme.js"></script>
+    <script src="<?php echo $path_prefix; ?>assets/js/theme.js"></script>
     <script>
         // Real-time Validation for Job Completion
         document.addEventListener('DOMContentLoaded', function() {

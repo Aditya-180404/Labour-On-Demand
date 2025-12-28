@@ -41,18 +41,11 @@ class CloudinaryHelper {
         try {
             $transformations = [
                 'crop' => 'limit',
-                'fetch_format' => 'auto'
+                'fetch_format' => 'auto',
+                'width' => 2560,
+                'height' => 2560,
+                'quality' => 'auto:best'
             ];
-
-            if ($type === 'high-res') {
-                $transformations['width'] = 2560;
-                $transformations['height'] = 2560;
-                $transformations['quality'] = 'auto:best';
-            } else {
-                $transformations['width'] = 1920;
-                $transformations['height'] = 1920;
-                $transformations['quality'] = 'auto:good';
-            }
 
             $options = [
                 'folder' => $folder,

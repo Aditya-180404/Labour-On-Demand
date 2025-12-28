@@ -82,6 +82,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     if (empty($date) || empty($time) || empty($address)) {
         $booking_error = "Please fill all booking details.";
     } else {
+        // Enforce booking time restriction (10 PM to 8 AM)
+        $booking_hour = (int)date('H', strtotime($time));
+        if ($booking_hour < 8 || $booking_hour >= 22) {
+            $_SESSION['toast_error'] = "Workers cannot be booked between 10:00 PM and 08:00 AM. Please choose a time within working hours (8 AM - 10 PM).";
+            header("Location: worker_profile.php?id=" . $worker_id);
+            exit;
+        }
         // Calculate end time (1 hour by default)
         $start_timestamp = strtotime("$date $time");
         $end_timestamp = $start_timestamp + 3600; // +1 hour
@@ -128,7 +135,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                             <li><strong>Location:</strong> $address</li>
                         </ul>
                         <p>Please login to your dashboard to <strong>Accept</strong> or <strong>Reject</strong> this job.</p>
-                        <a href='http://" . $_SERVER['HTTP_HOST'] . BASE_URL . "/worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
+                        <a href='http://" . $_SERVER['HTTP_HOST'] . str_replace('customer/worker_profile.php', '', $_SERVER['PHP_SELF']) . "worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -175,7 +182,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
 </head>
 <body class="bg-body">
 
-    <?php include '../includes/navbar.php'; ?>
+    <?php 
+    $path_prefix = '../';
+    include '../includes/navbar.php'; 
+    ?>
 
     <div class="container profile-container">
 

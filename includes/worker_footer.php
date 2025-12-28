@@ -1,6 +1,6 @@
 <?php
-// Determine the base path for links
-$base_path = '../';
+// Use $path_prefix if defined, otherwise default to '../' for worker context
+$base_path = $path_prefix ?? '../';
 
 // Get worker data for pre-filling
 $pre_name = '';
@@ -146,5 +146,5 @@ document.getElementById('workerFeedbackForm').addEventListener('submit', functio
 });
 </script>
 
-<?php include 'lightbox.php'; ?>
-<?php include 'toast.php'; ?>
+<?php include __DIR__ . '/lightbox.php'; ?>
+<?php include __DIR__ . '/toast.php'; ?>

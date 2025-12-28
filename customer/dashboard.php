@@ -96,7 +96,10 @@ $user = $user_stmt->fetch();
 </head>
 <body>
 
-    <?php include '../includes/navbar.php'; ?>
+    <?php 
+    $path_prefix = '../';
+    include '../includes/navbar.php'; 
+    ?>
 
     <div class="hero-section text-center">
         <div class="container">
@@ -104,7 +107,7 @@ $user = $user_stmt->fetch();
                 <?php 
                     $user_img = ($user['profile_image'] && $user['profile_image'] != 'default.png') 
                         ? $cld->getUrl($user['profile_image'], ['width' => 200, 'height' => 200, 'crop' => 'fill', 'gravity' => 'face']) 
-                        : BASE_URL . "/assets/img/default-user.png";
+                        : $path_prefix . "assets/img/default-user.png";
                 ?>
                 <div class="position-relative">
                     <img src="<?php echo $user_img; ?>" alt="Profile" class="rounded-circle border border-4 border-white border-opacity-25 shadow-lg" style="width: 100px; height: 100px; object-fit: cover;">

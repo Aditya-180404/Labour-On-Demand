@@ -95,7 +95,10 @@ $history_bookings = $history_stmt->fetchAll();
 </head>
 <body>
 
-    <?php include '../includes/navbar.php'; ?>
+    <?php 
+    $path_prefix = '../';
+    include '../includes/navbar.php'; 
+    ?>
 
     <div class="page-header">
         <div class="container d-flex justify-content-between align-items-center">

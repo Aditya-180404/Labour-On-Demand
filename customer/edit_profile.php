@@ -165,7 +165,10 @@ $user = $stmt->fetch();
     </style>
 </head>
 <body class="bg-body">
-    <?php include '../includes/navbar.php'; ?>
+    <?php 
+    $path_prefix = '../';
+    include '../includes/navbar.php'; 
+    ?>
 
     <div class="container py-5">
         <div class="row justify-content-center">

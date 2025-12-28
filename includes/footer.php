@@ -1,11 +1,8 @@
 <?php
 if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.');
 
-// Determine the base path for links
-$is_subfolder = (strpos($_SERVER['PHP_SELF'], '/worker/') !== false || 
-                 strpos($_SERVER['PHP_SELF'], '/admin/') !== false || 
-                 strpos($_SERVER['PHP_SELF'], '/customer/') !== false);
-$base_path = $is_subfolder ? '../' : '';
+// Determine the base path for links - relying on parent script to define $path_prefix
+$base_path = isset($path_prefix) ? $path_prefix : '';
 
 // Get user/worker data for pre-filling
 $pre_name = '';
@@ -152,5 +149,5 @@ document.getElementById('feedbackForm').addEventListener('submit', function(e) {
 });
 </script>
 
-<?php include 'lightbox.php'; ?>
-<?php include 'toast.php'; ?>
+<?php include __DIR__ . '/lightbox.php'; ?>
+<?php include __DIR__ . '/toast.php'; ?>

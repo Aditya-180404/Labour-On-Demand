@@ -1,4 +1,5 @@
 <?php
+$path_prefix = '../';
 require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
@@ -39,7 +40,7 @@ if (isset($_POST['action']) && isset($_POST['worker_id'])) {
                         <p>Hello <strong>{$worker['name']}</strong>,</p>
                         <p>Congratulations! Your worker profile has been approved by the admin.</p>
                         <p>You can now login to your account and start accepting bookings.</p>
-                        <a href='http://" . $_SERVER['HTTP_HOST'] . BASE_URL . "/worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
+                        <a href='http://" . $_SERVER['HTTP_HOST'] . $path_prefix . "worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -360,43 +361,138 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .admin-sidebar { height: 100vh; background: #343a40; position: fixed; width: 250px; padding-top: 20px; z-index: 1000; }
-        .admin-sidebar a { color: #cfd8dc; padding: 15px; display: block; text-decoration: none; border-left: 4px solid transparent; }
-        .admin-sidebar a:hover, .admin-sidebar a.active { background: #495057; color: white; border-left-color: #ffc107; }
-        .main-content { margin-left: 250px; padding: 30px; min-height: 100vh; transition: all 0.3s; }
-        
-        @media (max-width: 768px) {
-            .admin-sidebar { 
-                width: 100%; 
-                height: auto; 
-                position: relative; 
-                padding-top: 10px;
-                display: flex;
-                flex-direction: row;
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-            .admin-sidebar h4 { width: 100%; margin-bottom: 10px !important; }
-            .admin-sidebar a { padding: 10px 15px; border-left: none; border-bottom: 3px solid transparent; }
-            .admin-sidebar a:hover, .admin-sidebar a.active { border-left-color: transparent; border-bottom-color: #ffc107; }
-            .main-content { margin-left: 0; padding: 15px; }
+        :root {
+            --sidebar-width: 260px;
+            --sidebar-bg: #2c3136;
+            --sidebar-hover: #3e444a;
+            --primary-accent: #ffc107;
         }
-        .table thead th { background-color: #f8f9fa; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.5px; }
+
+        .admin-sidebar { 
+            height: 100vh; 
+            background: var(--sidebar-bg); 
+            position: fixed; 
+            width: var(--sidebar-width); 
+            padding-top: 20px; 
+            z-index: 1050;
+            transition: all 0.3s ease;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+        }
+
+        .admin-sidebar a { 
+            color: #cfd8dc; 
+            padding: 12px 20px; 
+            display: block; 
+            text-decoration: none; 
+            border-left: 4px solid transparent; 
+            transition: all 0.2s;
+        }
+
+        .admin-sidebar a:hover, .admin-sidebar a.active { 
+            background: var(--sidebar-hover); 
+            color: white; 
+            border-left-color: var(--primary-accent); 
+        }
+
+        .main-content { 
+            margin-left: var(--sidebar-width); 
+            padding: 25px; 
+            min-height: 100vh; 
+            transition: all 0.3s ease; 
+        }
+
+        /* Mobile Top Nav */
+        .mobile-header {
+            display: none;
+            background: var(--sidebar-bg);
+            color: white;
+            padding: 10px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1040;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        @media (max-width: 991.98px) {
+            .admin-sidebar { 
+                left: -260px;
+            }
+            .admin-sidebar.show {
+                left: 0;
+            }
+            .main-content { 
+                margin-left: 0; 
+                padding: 15px; 
+            }
+            .mobile-header {
+                display: flex;
+            }
+            .sidebar-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 1045;
+            }
+            .sidebar-overlay.show {
+                display: block;
+            }
+        }
+        .table thead th { background-color: #f8f9fa; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; white-space: nowrap; }
+        .card { border: none; border-radius: 12px; }
+        .nav-tabs .nav-link { color: #6c757d; border: none; border-bottom: 2px solid transparent; }
+        .nav-tabs .nav-link.active { color: var(--sidebar-bg); background: transparent; border-bottom-color: var(--primary-accent); font-weight: bold; }
     </style>
 </head>
-<body style="background-color: #d5cc9dff;">
+<body style="background-color: #ede7c9;">
 
-    <div class="admin-sidebar">
-        <h4 class="text-white text-center mb-4">Admin Panel</h4>
-        <a href="#" class="active"><i class="fas fa-tachometer-alt me-2"></i>Dashboard</a>
-        <!-- <a href="../index.php"><i class="fas fa-home me-2"></i>View Site</a> -->
-        <a href="../logout.php" class="text-danger"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+    <div class="mobile-header">
+        <h5 class="mb-0">Admin Panel</h5>
+        <button class="btn btn-outline-light btn-sm" id="sidebarToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <div class="admin-sidebar" id="adminSidebar">
+        <h4 class="text-white text-center mb-4 d-none d-lg-block">Admin Panel</h4>
+        <div class="px-3 mb-3 d-lg-none text-center">
+            <h5 class="text-white">Admin Panel</h5>
+            <hr class="text-white-50">
+        </div>
+        
+        <!-- Dashboard Sections (Visible in Hamburger Menu on Mobile) -->
+        <div class="sidebar-nav-links">
+            <a href="#" class="active" data-section="dashboard"><i class="fas fa-tachometer-alt me-2"></i>Dashboard Home</a>
+            
+            <!-- Mobile-Only Tab Links -->
+            <div class="d-lg-none">
+                <hr class="text-white-50 mx-3 my-2">
+                <small class="text-white-50 px-3 mb-2 d-block">Manage Data</small>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#doc-updates-tab"><i class="fas fa-file-upload me-2"></i>Document Updates</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#workers-tab"><i class="fas fa-users-cog me-2"></i>All Workers</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#users-tab"><i class="fas fa-users me-2"></i>All Customers</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#bookings-tab"><i class="fas fa-calendar-alt me-2"></i>All Bookings</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#feedback-tab"><i class="fas fa-comments me-2"></i>Feedback</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#history-tab"><i class="fas fa-history me-2"></i>Document History</a>
+                <hr class="text-white-50 mx-3 my-2">
+            </div>
+
+            <a href="<?php echo $path_prefix; ?>index.php"><i class="fas fa-home me-2"></i>View Site</a>
+            <a href="<?php echo $path_prefix; ?>logout.php" class="text-danger mt-auto"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+        </div>
     </div>
 
     <div class="main-content">
         <div class="container-fluid">
             <!-- Stats -->
-            <div class="row mb-4">
+            <div class="row g-3 mb-4">
                 <div class="col-md-3">
                     <div class="card bg-danger text-white border-0 shadow">
                         <div class="card-body">
@@ -486,7 +582,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
             <?php endif; ?>
 
             <!-- All Users & Workers Tabs -->
-            <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+            <ul class="nav nav-tabs mb-3 d-none d-lg-flex" id="adminTabs" role="tablist">
                 <li class="nav-item">
                     <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#doc-updates-tab" type="button">Document Updates <?php if(count($doc_updates)>0): ?><span class="badge bg-danger rounded-pill"><?php echo count($doc_updates); ?></span><?php endif; ?></button>
                 </li>
@@ -508,15 +604,6 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
             </ul>
 
             <div class="tab-content">
-<?php
-// Fetch All Bookings (already fetched above, this is redundant but keeping for compatibility)
-$bookings_stmt = $pdo->query("SELECT b.*, u.name as user_name, u.pin_code as user_pin, w.name as worker_name 
-                              FROM bookings b 
-                              JOIN users u ON b.user_id = u.id 
-                              JOIN workers w ON b.worker_id = w.id 
-                              ORDER BY b.created_at DESC");
-$bookings = $bookings_stmt->fetchAll();
-?>
                 <div class="tab-pane fade show active" id="doc-updates-tab">
                     <div class="card shadow-sm">
                         <div class="card-body">
@@ -1096,6 +1183,61 @@ $bookings = $bookings_stmt->fetchAll();
                     const tabTrigger = new bootstrap.Tab(activeTab);
                     tabTrigger.show();
                 }
+            }
+
+            // Sidebar Toggle Control
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('adminSidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+
+            if (toggleBtn && sidebar && overlay) {
+                const toggleSidebar = () => {
+                    sidebar.classList.toggle('show');
+                    overlay.classList.toggle('show');
+                    document.body.style.overflow = sidebar.classList.contains('show') ? 'hidden' : '';
+                };
+
+                toggleBtn.addEventListener('click', toggleSidebar);
+                overlay.addEventListener('click', toggleSidebar);
+
+                // Auto-close on link click (mobile)
+                sidebar.querySelectorAll('a').forEach(link => {
+                    link.addEventListener('click', (e) => {
+                        // Handle active state for tab links in sidebar
+                        if (link.hasAttribute('data-bs-toggle')) {
+                            sidebar.querySelectorAll('a').forEach(l => l.classList.remove('active'));
+                            link.classList.add('active');
+                            
+                            // Trigger the actual bootstrap tab
+                            const targetId = link.getAttribute('data-bs-target');
+                            const targetTabBtn = document.querySelector(`.nav-tabs button[data-bs-target="${targetId}"]`);
+                            if (targetTabBtn) {
+                                bootstrap.Tab.getOrCreateInstance(targetTabBtn).show();
+                            }
+
+                            // Scroll to main content on mobile for better visibility
+                            if (window.innerWidth < 992) {
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                        }
+
+                        if (window.innerWidth < 992) toggleSidebar();
+                    });
+                });
+
+                // Sync sidebar active state with tab clicks
+                const dashboardTabs = document.querySelectorAll('button[data-bs-toggle="tab"]');
+                dashboardTabs.forEach(tab => {
+                    tab.addEventListener('shown.bs.tab', function (e) {
+                        const targetId = e.target.getAttribute('data-bs-target');
+                        sidebar.querySelectorAll('a[data-bs-toggle="tab"]').forEach(link => {
+                            if (link.getAttribute('data-bs-target') === targetId) {
+                                sidebar.querySelectorAll('a').forEach(l => l.classList.remove('active'));
+                                link.classList.add('active');
+                            }
+                        });
+                    });
+                });
             }
         });
     </script>

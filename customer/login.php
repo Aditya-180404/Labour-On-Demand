@@ -1,4 +1,5 @@
 <?php
+$path_prefix = '../';
 require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
@@ -217,7 +218,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                                 <div class="mb-3">
                                     <label for="otp" class="form-label">Enter OTP</label>
-                                    <input type="text" class="form-control" id="otp" name="otp" required placeholder="6-digit code">
+                                    <input type="text" class="form-control" id="otp" name="otp" required placeholder="6-digit code" inputmode="numeric" pattern="[0-9]*">
                                 </div>
                                 <div class="mb-3">
                                     <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>

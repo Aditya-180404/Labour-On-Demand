@@ -1,4 +1,5 @@
 <?php
+$path_prefix = '../';
 require_once '../config/security.php';
 require_once '../config/db.php';
 require_once '../includes/captcha.php';
@@ -63,7 +64,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             </div>
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
-                                <input type="password" class="form-control" id="password" name="password" required>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="password" name="password" required>
+                                    <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
                             </div>
                             <div class="mb-3 text-center">
                                 <div class="g-recaptcha d-inline-block" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
@@ -78,5 +84,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
         </div>
     </div>
+
+    <script>
+        document.getElementById('togglePassword').addEventListener('click', function() {
+            const passwordField = document.getElementById('password');
+            const icon = this.querySelector('i');
+            
+            if (passwordField.getAttribute('type') === 'password') {
+                passwordField.setAttribute('type', 'text');
+                icon.classList.replace('fa-eye', 'fa-eye-slash');
+            } else {
+                passwordField.setAttribute('type', 'password');
+                icon.classList.replace('fa-eye-slash', 'fa-eye');
+            }
+        });
+    </script>
 </body>
 </html>

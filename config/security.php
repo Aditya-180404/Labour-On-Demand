@@ -5,6 +5,11 @@ if (!defined('EXECUTION_ALLOWED')) {
     define('EXECUTION_ALLOWED', true);
 }
 
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+
 // 2. Security Headers
 // Prevent Clickjacking
 header("X-Frame-Options: SAMEORIGIN");

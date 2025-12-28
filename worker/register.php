@@ -429,7 +429,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <p class="text-muted">Enter the 6-digit code sent to your email.</p>
                                 </div>
                                 <div class="mb-3">
-                                    <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6">
+                                    <input type="text" class="form-control text-center text-tracking-widest" style="letter-spacing: 5px; font-size: 1.5rem;" name="otp" placeholder="XXXXXX" required maxlength="6" inputmode="numeric" pattern="[0-9]*">
                                 </div>
                                 <div class="mb-3">
                                     <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
