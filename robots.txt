@@ -1,0 +1,17 @@
+User-agent: *
+Disallow: /config/
+Disallow: /includes/
+Disallow: /error_templates/
+Disallow: /admin/
+Disallow: /temp/
+
+User-agent: HTTrack
+Disallow: /
+
+User-agent: wget
+Disallow: /
+
+User-agent: curl
+Disallow: /
+
+Sitemap: https://labour-on-demand.infinityfreeapp.com/sitemap.xml

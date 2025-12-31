@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
 
@@ -15,6 +15,13 @@ $error = "";
 
 // Handle OTP Generation for Profile Update (AJAX endpoint)
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
+    // CSRF Protection for AJAX
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'error', 'message' => 'Security Validation Failed (CSRF).']);
+        exit;
+    }
+
     require_once '../includes/mailer.php';
     
     $stmt = $pdo->prepare("SELECT email, name FROM users WHERE id = ?");
@@ -24,8 +31,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
     $otp = rand(100000, 999999);
     $expiry = date("Y-m-d H:i:s", strtotime("+10 minutes"));
     
+    // Store Hashed OTP
+    $hashed_otp = hash_hmac('sha256', (string)$otp, OTP_SECRET_KEY);
     $pdo->prepare("UPDATE users SET otp = ?, otp_expires_at = ? WHERE id = ?")
-        ->execute([$otp, $expiry, $user_id]);
+        ->execute([$hashed_otp, $expiry, $user_id]);
     
     $mail_result = sendOTPEmail($user_data['email'], $otp, $user_data['name']);
     header('Content-Type: application/json');
@@ -37,7 +46,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
 }
 
 // Handle Form Submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['send_profile_otp'])) {
+    // 1. Bot Detection
+    if (isBotDetected()) {
+        die("Security validation failed: Bot detected.");
+    }
+    // 2. CSRF Protection
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security Validation Failed (CSRF). Please refresh the page.");
+    }
+
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
     $new_password = $_POST['new_password'];
@@ -61,7 +79,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt_otp->execute([$user_id]);
         $otp_data = $stmt_otp->fetch();
 
-        if (empty($otp_entered) || $otp_data['otp'] !== $otp_entered || strtotime($otp_data['otp_expires_at']) < time()) {
+        $entered_hash = hash_hmac('sha256', (string)$otp_entered, OTP_SECRET_KEY);
+        if (empty($otp_entered) || !hash_equals($otp_data['otp'] ?? '', $entered_hash) || strtotime($otp_data['otp_expires_at']) < time()) {
             $error = "Invalid or expired OTP. Please verify your identity to change email/password.";
         } else {
             // Clear OTP after successful verification
@@ -78,41 +97,56 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 
+    // Validate Inputs
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error = "Invalid email format.";
+    } elseif (!preg_match('/^\d{10}$/', $phone)) {
+        $error = "Phone number must be 10 digits.";
+    } elseif (!preg_match('/^\d{6}$/', $pin_code)) {
+        $error = "PIN Code must be 6 digits.";
+    } elseif ($password_changed && strlen($new_password) < 8) {
+        $error = "New password must be at least 8 characters.";
+    }
+
     // Handle File Upload
     $profile_image_url = null;
     $profile_image_public_id = null;
 
-    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
-        $allowed_img_ext = array('jpg', 'jpeg', 'png', 'webp');
-        $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
-        
-        if (in_array($ext, $allowed_img_ext)) {
-            if ($_FILES['profile_image']['size'] > 10 * 1024 * 1024) {
-                $error = "File size exceeds 10MB limit.";
-            } else {
-                $cld = CloudinaryHelper::getInstance();
-                
-                // Fetch old public_id to delete
-                $stmt = $pdo->prepare("SELECT profile_image_public_id FROM users WHERE id = ?");
-                $stmt->execute([$user_id]);
-                $old_data = $stmt->fetch();
-                
-                $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_USERS, 'standard');
-                
-                if ($upload) {
-                    $profile_image_url = $upload['url'];
-                    $profile_image_public_id = $upload['public_id'];
-                    
-                    // Delete old image if it exists
-                    if ($old_data && $old_data['profile_image_public_id']) {
-                        $cld->deleteImage($old_data['profile_image_public_id']);
-                    }
-                } else {
-                    $error = "Failed to upload to cloud storage.";
-                }
-            }
+    if (!$error && isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
+        if (Validator::isMaliciousFile($_FILES['profile_image']['name'])) { // Fixed Validator call
+            $error = "Security Warning: Potential code file detected in profile image. Please upload a valid image (JPG/PNG/WEBP).";
         } else {
-            $error = "Invalid file type. Only JPG, PNG, WEBP allowed.";
+            $allowed_img_ext = array('jpg', 'jpeg', 'png', 'webp');
+            $ext = strtolower(pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION));
+            
+            if (in_array($ext, $allowed_img_ext)) {
+                if ($_FILES['profile_image']['size'] > 10 * 1024 * 1024) {
+                    $error = "File size exceeds 10MB limit.";
+                } else {
+                    $cld = CloudinaryHelper::getInstance();
+                    
+                    // Fetch old public_id to delete
+                    $stmt = $pdo->prepare("SELECT profile_image_public_id FROM users WHERE id = ?");
+                    $stmt->execute([$user_id]);
+                    $old_data = $stmt->fetch();
+                    
+                    $upload = $cld->uploadImage($_FILES['profile_image']['tmp_name'], CLD_FOLDER_USERS, 'standard');
+                    
+                    if ($upload) {
+                        $profile_image_url = $upload['url'];
+                        $profile_image_public_id = $upload['public_id'];
+                        
+                        // Delete old image if it exists
+                        if ($old_data && $old_data['profile_image_public_id']) {
+                            $cld->deleteImage($old_data['profile_image_public_id']);
+                        }
+                    } else {
+                        $error = "Failed to upload to cloud storage.";
+                    }
+                }
+            } else {
+                $error = "Invalid file type. Only JPG, PNG, WEBP allowed.";
+            }
         }
     }
 
@@ -188,6 +222,8 @@ $user = $stmt->fetch();
                         <?php endif; ?>
 
                         <form action="edit_profile.php" method="POST" enctype="multipart/form-data" id="profileForm">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
                             <div id="sizeWarning"></div>
                             <div class="text-center mb-4">
                                 <?php 
@@ -360,6 +396,7 @@ $user = $stmt->fetch();
                 
                 const formData = new FormData();
                 formData.append('send_profile_otp', '1');
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
                 
                 fetch('edit_profile.php', {
                     method: 'POST',

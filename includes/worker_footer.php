@@ -94,7 +94,7 @@ if (isset($_SESSION['worker_id'])) {
                             </button>
                         </div>
                         <div class="col-12">
-                            <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                            <div class="g-recaptcha mb-3 d-flex justify-content-center" data-sitekey="6LfUczssAAAAAJAyN5ozYXwMRzPfmfnzex9NRLdu"></div>
                              <script src="https://www.google.com/recaptcha/api.js" async defer></script>
                         </div>
                         <div class="col-12 text-center mt-2">

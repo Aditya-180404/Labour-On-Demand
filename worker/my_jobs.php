@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
 require_once '../includes/cloudinary_helper.php';
@@ -12,6 +12,19 @@ if (!isset($_SESSION['worker_id'])) {
 
 $worker_id = $_SESSION['worker_id'];
 $success_msg = $error_msg = "";
+$open_modal_id = null;
+
+// Handle POST Requests (CSRF & Bot Protection)
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // 1. Bot Detection
+    if (isBotDetected()) {
+        die("Security validation failed: Bot detected.");
+    }
+    // 2. CSRF Validation
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security validation failed. Please refresh and try again.");
+    }
+}
 
 // Handle Booking Actions (Accept/Reject)
 if (isset($_POST['booking_action']) && isset($_POST['booking_id'])) {
@@ -62,8 +75,8 @@ if (isset($_POST['initiate_completion']) && isset($_POST['booking_id']) && isset
     $booking_id = $_POST['booking_id'];
     $amount_paid = $_POST['amount_paid'];
     
-    if ($amount_paid < 0) {
-        $error_msg = "Amount received cannot be negative.";
+    if ($amount_paid <= 0) {
+        $error_msg = "Amount received must be greater than zero.";
     } else {
         // Verify booking
         $stmt = $pdo->prepare("SELECT b.id, b.user_id, u.name as user_name, u.email as user_email, w.name as worker_name, w.worker_uid, c.name as category_name
@@ -110,6 +123,7 @@ if (isset($_POST['initiate_completion']) && isset($_POST['booking_id']) && isset
                 
                 if ($mail_result['status']) {
                     $success_msg = "Proof uploaded. OTP sent to customer for verification.";
+                    $open_modal_id = $booking_id;
                 } else {
                     $error_msg = "Proof uploaded but failed to send OTP email: " . $mail_result['message'];
                 }
@@ -134,24 +148,53 @@ if (isset($_POST['verify_completion']) && isset($_POST['booking_id']) && isset($
     
     if ($booking) {
         if ($booking['completion_otp'] == $entered_otp) {
-            
-            // Validate Expiry (Optional, if you want strictly 10 mins)
-            // if (strtotime($booking['completion_otp_expires_at']) < time()) { ... }
-            
-            $completion_time = date('Y-m-d H:i:s');
-            
-            // Mark Completed
-            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'completed', completion_time = ?, completion_otp = NULL, completion_otp_expires_at = NULL WHERE id = ?");
-            if ($update_stmt->execute([$completion_time, $booking_id])) {
-                 $success_msg = "Job successfully marked as completed!";
+            // Validate Expiry
+            if (strtotime($booking['completion_otp_expires_at'] ?? '') < time()) {
+                $error_msg = "OTP has expired. Please initiate completion again.";
             } else {
-                 $error_msg = "Database error verifying OTP.";
+                $completion_time = date('Y-m-d H:i:s');
+                // Mark Completed
+                $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'completed', completion_time = ?, completion_otp = NULL, completion_otp_expires_at = NULL WHERE id = ?");
+                if ($update_stmt->execute([$completion_time, $booking_id])) {
+                     $success_msg = "Job successfully marked as completed!";
+                } else {
+                     $error_msg = "Database error verifying OTP.";
+                }
             }
         } else {
             $error_msg = "Invalid OTP. Please ask the customer for the correct code.";
         }
     } else {
         $error_msg = "Invalid booking.";
+    }
+    if (!empty($error_msg)) $open_modal_id = $booking_id;
+}
+
+// Handle Resend Completion OTP
+if (isset($_POST['resend_completion_otp']) && isset($_POST['booking_id'])) {
+    $booking_id = $_POST['booking_id'];
+    // Verify booking
+    $stmt = $pdo->prepare("SELECT b.id, b.user_id, u.name as user_name, u.email as user_email, w.name as worker_name, w.worker_uid, c.name as category_name, b.amount_paid
+                           FROM bookings b 
+                           JOIN users u ON b.user_id = u.id 
+                           JOIN workers w ON b.worker_id = w.id 
+                           JOIN categories c ON w.service_category_id = c.id
+                           WHERE b.id = ? AND b.worker_id = ? AND b.status = 'accepted' AND b.completion_otp IS NOT NULL");
+    $stmt->execute([$booking_id, $worker_id]);
+    $booking_data = $stmt->fetch();
+    
+    if ($booking_data) {
+        $otp = rand(100000, 999999);
+        $expires_at = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+        $update = $pdo->prepare("UPDATE bookings SET completion_otp = ?, completion_otp_expires_at = ? WHERE id = ?");
+        if ($update->execute([$otp, $expires_at, $booking_id])) {
+            $mail_result = sendBookingCompletionOTP($booking_data['user_email'], $otp, $booking_data['user_name'], $booking_data['worker_name'], $booking_data['category_name'], $booking_data['worker_uid'], $booking_data['amount_paid']);
+            if ($mail_result['status']) {
+                $success_msg = "New OTP sent to customer.";
+                $open_modal_id = $booking_id;
+            }
+            else $error_msg = "Failed to resend. Please try again.";
+        }
     }
 }
 
@@ -192,6 +235,16 @@ if (isset($_POST['extend_booking']) && isset($_POST['booking_id']) && isset($_PO
             $update_stmt = $pdo->prepare("UPDATE bookings SET service_end_time = ? WHERE id = ?");
             if ($update_stmt->execute([$new_end, $booking_id])) {
                 $success_msg = "Job extended to " . date('h:i A', strtotime($new_end));
+                
+                // NOTIFY CUSTOMER
+                $u_stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = (SELECT user_id FROM bookings WHERE id = ?)");
+                $u_stmt->execute([$booking_id]);
+                $user = $u_stmt->fetch();
+                if ($user) {
+                    $subject = "Booking Extended - Labour On Demand";
+                    $message = "Your booking #BK-{$booking_id} has been extended by the worker. New end time: " . date('h:i A', strtotime($new_end));
+                    sendEmail($user['email'], $user['name'], $subject, $message);
+                }
             } else {
                 $error_msg = "Failed to extend job.";
             }
@@ -299,6 +352,8 @@ $history_bookings = $history_stmt->fetchAll();
                                             </div>
                                             <div class="col-md-4 text-md-end mt-3 mt-md-0">
                                                 <form method="POST" class="d-flex gap-2 justify-content-md-end">
+                                                    <?php echo csrf_input(); ?>
+                                                    <?php renderHoneypot(); ?>
                                                     <input type="hidden" name="booking_id" value="<?php echo $booking['id']; ?>">
                                                     <button type="submit" name="booking_action" value="accepted" class="btn btn-success btn-sm btn-action shadow-sm"><i class="fas fa-check me-1"></i>Accept</button>
                                                     <button type="submit" name="booking_action" value="rejected" class="btn btn-outline-danger btn-sm btn-action"><i class="fas fa-times me-1"></i>Reject</button>
@@ -377,6 +432,7 @@ $history_bookings = $history_stmt->fetchAll();
                                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                                 </div>
                                                                 <form method="POST">
+                                                                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRF(); ?>">
                                                                     <div class="modal-body p-4 text-center">
                                                                         <p class="small text-muted mb-4">How much longer will this take?</p>
                                                                         <div class="d-grid gap-2">
@@ -400,7 +456,9 @@ $history_bookings = $history_stmt->fetchAll();
                                                                     <h5 class="modal-title fw-bold">Job Completion Proof</h5>
                                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                                 </div>
-                                                                <form method="POST" enctype="multipart/form-data" class="completion-form">
+                                                                 <form method="POST" enctype="multipart/form-data" class="completion-form">
+                                                                    <?php echo csrf_input(); ?>
+                                                                    <?php renderHoneypot(); ?>
                                                                     <div class="modal-body p-4">
                                                                         <p class="small text-muted mb-3">Upload photos of the work done and enter the amount received. An OTP will be sent to the customer.</p>
                                                                         
@@ -408,7 +466,7 @@ $history_bookings = $history_stmt->fetchAll();
                                                                             <label class="form-label small fw-bold text-muted">Amount Received (₹)</label>
                                                                             <div class="input-group">
                                                                                 <span class="input-group-text bg-body-secondary border-0 text-body">₹</span>
-                                                                                <input type="number" name="amount_paid" class="form-control bg-body-secondary border-0 text-body" required placeholder="0.00" min="0" step="0.01">
+                                                                                <input type="number" name="amount_paid" class="form-control bg-body-secondary border-0 text-body" required placeholder="0.00" min="0.01" step="0.01">
                                                                             </div>
                                                                         </div>
                                                                         
@@ -436,12 +494,22 @@ $history_bookings = $history_stmt->fetchAll();
                                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                                 </div>
                                                                 <form method="POST">
+                                                                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRF(); ?>">
                                                                     <div class="modal-body p-4 text-center">
                                                                         <p class="text-muted small mb-4">Enter the 6-digit code sent to <strong><?php echo htmlspecialchars($booking['user_name']); ?></strong> to complete this job.</p>
                                                                         
-                                                                        <div class="mb-4">
-                                                                            <input type="text" name="otp" class="form-control text-center fs-2 letter-spacing-2" placeholder="XXXXXX" maxlength="6" required style="letter-spacing: 5px;">
-                                                                        </div>
+                                                                         <div class="mb-3">
+                                                                             <?php 
+                                                                                $remaining = 0;
+                                                                                if (!empty($booking['completion_otp_expires_at'])) {
+                                                                                    $remaining = strtotime($booking['completion_otp_expires_at']) - time();
+                                                                                    if ($remaining < 0) $remaining = 0;
+                                                                                }
+                                                                             ?>
+                                                                             <input type="text" name="otp" class="form-control text-center fs-2 letter-spacing-2" placeholder="XXXXXX" maxlength="6" inputmode="numeric" pattern="\d{6}" required style="letter-spacing: 5px;">
+                                                                             <div class="mt-2 small text-muted">Expires in: <span id="timer-<?php echo $booking['id']; ?>" class="text-primary fw-bold" data-remaining="<?php echo $remaining; ?>">--:--</span></div>
+                                                                             <div id="resend-<?php echo $booking['id']; ?>" class="mt-2"><button type="submit" name="resend_completion_otp" value="1" class="btn btn-link btn-sm p-0 text-decoration-none fw-bold">Resend Code</button></div>
+                                                                         </div>
 
                                                                         <input type="hidden" name="booking_id" value="<?php echo $booking['id']; ?>">
                                                                         <input type="hidden" name="verify_completion" value="1">
@@ -523,13 +591,13 @@ $history_bookings = $history_stmt->fetchAll();
                 errorDiv.style.display = 'none';
                 errorDiv.style.color = '#dc3545';
                 errorDiv.style.fontSize = '0.875em';
-                errorDiv.innerText = 'Amount cannot be negative.';
+                errorDiv.innerText = 'Amount must be greater than zero.';
                 
                 // Append after parent input-group
                 input.closest('.input-group').parentNode.appendChild(errorDiv);
 
                 const validate = () => {
-                    if (parseFloat(input.value) < 0) {
+                    if (parseFloat(input.value) <= 0) {
                         input.classList.add('is-invalid');
                         errorDiv.style.display = 'block';
                     } else {
@@ -544,6 +612,55 @@ $history_bookings = $history_stmt->fetchAll();
 
             // --- IMAGE COMPRESSION FOR JOB COMPLETION ---
             ImageCompressor.attach('.completion-form', 'Optimizing proof photos...');
+
+            // START: OTP Countdown Timer Logic
+            function startTimer(duration, display, bookingId) {
+                var timer = duration, minutes, seconds;
+                var interval = setInterval(function () {
+                    minutes = parseInt(timer / 60, 10);
+                    seconds = parseInt(timer % 60, 10);
+                    minutes = minutes < 10 ? "0" + minutes : minutes;
+                    seconds = seconds < 10 ? "0" + seconds : seconds;
+                    display.textContent = minutes + ":" + seconds;
+                    
+                    if (--timer < 0) {
+                        clearInterval(interval);
+                        display.textContent = "00:00";
+                        display.parentElement.innerHTML = '<span class="text-danger">Expired. <a href="" class="text-decoration-none">Refresh</a></span>';
+                    }
+                }, 1000);
+                
+                // Store interval ID to clear it if needed
+                display.setAttribute('data-interval-id', interval);
+            }
+
+            // Start timers when modals are shown
+            document.querySelectorAll('.modal').forEach(modal => {
+                modal.addEventListener('shown.bs.modal', function () {
+                   const timerEl = this.querySelector('[id^="timer-"]');
+                   if(timerEl) {
+                       const bookingId = timerEl.id.split('-')[1];
+                       const remainingSeconds = parseInt(timerEl.getAttribute('data-remaining') || 0);
+                       
+                       // Clear any existing interval first
+                       const existingInterval = timerEl.getAttribute('data-interval-id');
+                       if(existingInterval) clearInterval(existingInterval);
+                       
+                       if(remainingSeconds > 0) {
+                           startTimer(remainingSeconds, timerEl, bookingId);
+                       } else {
+                           timerEl.textContent = "00:00";
+                           timerEl.parentElement.innerHTML = '<span class="text-danger">Expired. <a href="" class="text-decoration-none">Refresh</a></span>';
+                       }
+                   }
+                });
+            });
+            // END: OTP Countdown Timer Logic
+
+            <?php if ($open_modal_id): ?>
+            var myModal = new bootstrap.Modal(document.getElementById('verifyModal<?php echo $open_modal_id; ?>'));
+            myModal.show();
+            <?php endif; ?>
         });
     </script>
 </body>

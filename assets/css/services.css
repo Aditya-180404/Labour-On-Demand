@@ -1,0 +1,29 @@
+/* Services Page Styles */
+.service-card {
+    transition: all 0.3s ease;
+    cursor: pointer;
+    background: var(--glass-bg);
+}
+
+.service-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1) !important;
+}
+
+.service-card .icon-wrapper {
+    transition: all 0.3s ease;
+}
+
+.service-card:hover .icon-wrapper {
+    transform: scale(1.1);
+    background-color: var(--bs-primary) !important;
+}
+
+.service-card:hover .icon-wrapper i {
+    color: white !important;
+}
+
+[data-bs-theme="dark"] .service-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}

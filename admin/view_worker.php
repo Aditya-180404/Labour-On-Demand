@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
 $cld = CloudinaryHelper::getInstance();
@@ -8,6 +8,16 @@ $cld = CloudinaryHelper::getInstance();
 if (!isset($_SESSION['admin_logged_in'])) {
     header("Location: index.php");
     exit;
+}
+
+// Global CSRF & Bot Protection for all Admin Actions
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if (isBotDetected()) {
+        die("Security Error: Bot detected. Action blocked.");
+    }
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security Error: Invalid CSRF Token. Please refresh the page.");
+    }
 }
 
 if (!isset($_GET['id'])) {
@@ -29,16 +39,31 @@ if (isset($_POST['update_status'])) {
     }
 }
 
-// Handle Document Update Approval/Rejection (from this page)
+// Handle Document & Profile Update Approval/Rejection
 if (isset($_POST['doc_action'])) {
     $action = $_POST['doc_action'];
+    $stmt = $pdo->prepare("SELECT * FROM workers WHERE id = ?");
+    $stmt->execute([$worker_id]);
+    $w = $stmt->fetch();
+
     if ($action === 'approve') {
-        $stmt = $pdo->prepare("SELECT profile_image, profile_image_public_id, aadhar_photo, aadhar_photo_public_id, pan_photo, pan_photo_public_id, signature_photo, signature_photo_public_id, pending_profile_image, pending_profile_image_public_id, pending_aadhar_photo, pending_aadhar_photo_public_id, pending_pan_photo, pending_pan_photo_public_id, pending_signature_photo, pending_signature_photo_public_id FROM workers WHERE id = ?");
-        $stmt->execute([$worker_id]);
-        $w = $stmt->fetch();
-        
         $updates = [];
         $params = [];
+        
+        // 1. Process Text Updates (JSON)
+        $pending_json = json_decode($w['pending_updates'] ?? '[]', true);
+        if (!empty($pending_json)) {
+            foreach ($pending_json as $field => $val) {
+                // Sanitelist allowed fields to prevent arbitrary column injection
+                if (in_array($field, ['name', 'email', 'phone', 'hourly_rate', 'bio', 'address', 'pin_code', 'working_location'])) {
+                    $updates[] = "$field = ?";
+                    $params[] = $val;
+                }
+            }
+        }
+
+        // 2. Process Documents
+        // [Existing Document Logic Remains - simplified for brevity but preserving intent]
         if ($w['pending_profile_image']) { 
             if ($w['profile_image'] && $w['profile_image'] != 'default.png') {
                 $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'profile', ?, ?)")->execute([$worker_id, $w['profile_image'], $w['profile_image_public_id']]);
@@ -47,36 +72,48 @@ if (isset($_POST['doc_action'])) {
             $updates[] = "profile_image_public_id = ?"; $params[] = $w['pending_profile_image_public_id']; 
         }
         if ($w['pending_aadhar_photo']) { 
-             if ($w['aadhar_photo']) {
+            if ($w['aadhar_photo']) {
                 $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'aadhar', ?, ?)")->execute([$worker_id, $w['aadhar_photo'], $w['aadhar_photo_public_id']]);
             }
             $updates[] = "aadhar_photo = ?"; $params[] = $w['pending_aadhar_photo']; 
             $updates[] = "aadhar_photo_public_id = ?"; $params[] = $w['pending_aadhar_photo_public_id']; 
         }
         if ($w['pending_pan_photo']) { 
-             if ($w['pan_photo']) {
+            if ($w['pan_photo']) {
                 $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'pan', ?, ?)")->execute([$worker_id, $w['pan_photo'], $w['pan_photo_public_id']]);
             }
             $updates[] = "pan_photo = ?"; $params[] = $w['pending_pan_photo']; 
             $updates[] = "pan_photo_public_id = ?"; $params[] = $w['pending_pan_photo_public_id']; 
         }
         if ($w['pending_signature_photo']) { 
-             if ($w['signature_photo']) {
+            if ($w['signature_photo']) {
                 $pdo->prepare("INSERT INTO worker_photo_history (worker_id, photo_type, photo_path, photo_public_id) VALUES (?, 'signature', ?, ?)")->execute([$worker_id, $w['signature_photo'], $w['signature_photo_public_id']]);
             }
             $updates[] = "signature_photo = ?"; $params[] = $w['pending_signature_photo']; 
             $updates[] = "signature_photo_public_id = ?"; $params[] = $w['pending_signature_photo_public_id']; 
         }
         
-        if (!empty($updates)) {
-            $query = "UPDATE workers SET " . implode(', ', $updates) . ", pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'approved' WHERE id = ?";
-            $params[] = $worker_id;
-            $pdo->prepare($query)->execute($params);
-            $success_msg = "Documents updated and approved. Old photos moved to history.";
-        }
+        // Always clear pending columns on approval
+        $updates[] = "pending_updates = NULL";
+        $updates[] = "pending_profile_image = NULL";
+        $updates[] = "pending_profile_image_public_id = NULL";
+        $updates[] = "pending_aadhar_photo = NULL";
+        $updates[] = "pending_aadhar_photo_public_id = NULL";
+        $updates[] = "pending_pan_photo = NULL";
+        $updates[] = "pending_pan_photo_public_id = NULL";
+        $updates[] = "pending_signature_photo = NULL";
+        $updates[] = "pending_signature_photo_public_id = NULL";
+        $updates[] = "doc_update_status = 'approved'";
+
+        $query = "UPDATE workers SET " . implode(', ', $updates) . " WHERE id = ?";
+        $params[] = $worker_id;
+        
+        $pdo->prepare($query)->execute($params);
+        $success_msg = "Profile changes approved and applied.";
     } else {
-        $pdo->prepare("UPDATE workers SET pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'rejected' WHERE id = ?")->execute([$worker_id]);
-        $success_msg = "Document update request rejected.";
+        // Reject: Clear all pending columns
+        $pdo->prepare("UPDATE workers SET pending_updates = NULL, pending_profile_image = NULL, pending_profile_image_public_id = NULL, pending_aadhar_photo = NULL, pending_aadhar_photo_public_id = NULL, pending_pan_photo = NULL, pending_pan_photo_public_id = NULL, pending_signature_photo = NULL, pending_signature_photo_public_id = NULL, doc_update_status = 'rejected' WHERE id = ?")->execute([$worker_id]);
+        $success_msg = "Update request rejected. No changes applied.";
     }
     
     // Refresh worker data
@@ -259,6 +296,7 @@ $income_history = $income_stmt->fetchAll();
                     </div>
 
                     <form method="POST" class="mb-3">
+                        <?php echo csrf_input(); ?>
                         <label class="form-label small fw-bold text-uppercase text-muted">Update Account Status</label>
                         <div class="input-group">
                             <select name="status" class="form-select border-0 bg-transparent text-body">
@@ -352,12 +390,39 @@ $income_history = $income_stmt->fetchAll();
                 <div class="card mb-4 border-start border-4 border-warning bg-body-tertiary shadow-sm">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h5 class="mb-0 fw-bold text-warning"><i class="fas fa-clock me-2"></i>Pending Document Update Request</h5>
+                            <h5 class="mb-0 fw-bold text-warning"><i class="fas fa-clock me-2"></i>Pending Profile & Document Updates</h5>
                             <form method="POST" class="d-flex gap-2">
+                                <?php echo csrf_input(); ?>
                                 <button type="submit" name="doc_action" value="approve" class="btn btn-success btn-sm rounded-pill px-3">Approve All</button>
                                 <button type="submit" name="doc_action" value="reject" class="btn btn-outline-danger btn-sm rounded-pill px-3">Reject All</button>
                             </form>
                         </div>
+
+                        <!-- 1. Text Changes -->
+                        <?php 
+                        $pending_json = json_decode($worker['pending_updates'] ?? '[]', true);
+                        if (!empty($pending_json)): 
+                        ?>
+                        <h6 class="text-uppercase text-muted small fw-bold mb-2">Profile Details Changed</h6>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm table-bordered bg-white">
+                                <thead class="table-light">
+                                    <tr><th>Field</th><th>Original Value</th><th>New Value</th></tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($pending_json as $field => $new_val): ?>
+                                    <tr>
+                                        <td class="text-capitalize fw-bold"><?php echo str_replace('_', ' ', $field); ?></td>
+                                        <td class="text-muted"><?php echo htmlspecialchars($worker[$field]); ?></td>
+                                        <td class="text-primary fw-bold"><?php echo htmlspecialchars($new_val); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- 2. Document Changes -->
                         <div class="row g-3 text-center">
                             <?php if($worker['pending_profile_image']): ?>
                             <div class="col-md-6 col-lg-3">

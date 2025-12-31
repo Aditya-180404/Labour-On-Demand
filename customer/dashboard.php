@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
 $cld = CloudinaryHelper::getInstance();
@@ -102,7 +102,7 @@ $user = $user_stmt->fetch();
     ?>
 
     <div class="hero-section text-center">
-        <div class="container">
+        <div class="container reveal-fade">
             <div class="mb-4 d-flex justify-content-center">
                 <?php 
                     $user_img = ($user['profile_image'] && $user['profile_image'] != 'default.png') 
@@ -128,7 +128,7 @@ $user = $user_stmt->fetch();
 
     <div class="container mb-5">
         <!-- Stats Row -->
-        <div class="row g-4 mb-5">
+        <div class="row g-4 mb-5 reveal-fade" data-delay="100">
             <div class="col-md-4">
                 <div class="card stat-card p-4">
                     <div class="d-flex justify-content-between align-items-center">
@@ -170,7 +170,7 @@ $user = $user_stmt->fetch();
             </div>
         </div>
 
-        <div class="row">
+        <div class="row reveal-fade" data-delay="200">
             <!-- Quick Actions -->
             <div class="col-lg-6">
                 <h5 class="mb-4 fw-bold">Quick Actions</h5>

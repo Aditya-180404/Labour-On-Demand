@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 
 // Check if worker is logged in
@@ -22,11 +22,12 @@ $rating_summary = $rating_stmt->fetch();
 $avg_rating = round($rating_summary['avg_rating'], 1);
 $total_reviews = $rating_summary['total_reviews'];
 
-// Fetch All Reviews
+// Fetch All Reviews with Booking Details
 $reviews_stmt = $pdo->prepare("
-    SELECT r.*, u.name as user_name 
+    SELECT r.*, u.name as user_name, b.service_date, b.service_time, b.address
     FROM reviews r 
     JOIN users u ON r.user_id = u.id 
+    LEFT JOIN bookings b ON r.booking_id = b.id
     WHERE r.worker_id = ? 
     ORDER BY r.created_at DESC
 ");
@@ -88,7 +89,23 @@ $reviews = $reviews_stmt->fetchAll();
                                     </div>
                                     <small class="text-muted"><?php echo date('M d, Y', strtotime($review['created_at'])); ?></small>
                                 </div>
-                                <p class="mb-0 text-muted fst-italic">"<?php echo nl2br(htmlspecialchars($review['comment'] ?: 'No comment provided.')); ?>"</p>
+                                <p class="mb-3 text-muted fst-italic">"<?php echo nl2br(htmlspecialchars($review['comment'] ?: 'No comment provided.')); ?>"</p>
+                                
+                                <?php if($review['address']): ?>
+                                    <div class="pt-3 border-top mt-2">
+                                        <div class="d-flex align-items-center gap-3 text-muted small">
+                                            <div title="Service Date & Time">
+                                                <i class="fas fa-calendar-alt me-1 text-primary"></i>
+                                                <?php echo date('M d, Y', strtotime($review['service_date'])); ?> 
+                                                <span class="ms-1"><?php echo date('h:i A', strtotime($review['service_time'])); ?></span>
+                                            </div>
+                                            <div title="Work Location">
+                                                <i class="fas fa-map-marker-alt me-1 text-danger"></i>
+                                                <?php echo htmlspecialchars($review['address']); ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     <?php endforeach; ?>

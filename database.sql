@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS `workers` (
     `aadhar_photo` VARCHAR(255),
     `pan_photo` VARCHAR(255),
     `signature_photo` VARCHAR(255) DEFAULT NULL,
+    `pending_updates` JSON DEFAULT NULL,
+    `pending_profile_image` VARCHAR(255) DEFAULT NULL,
+    `pending_aadhar_photo` VARCHAR(255) DEFAULT NULL,
+    `pending_pan_photo` VARCHAR(255) DEFAULT NULL,
     `pending_signature_photo` VARCHAR(255) DEFAULT NULL,
     `previous_work_images` TEXT DEFAULT NULL,
     `working_location` VARCHAR(100),
@@ -164,4 +168,27 @@ CREATE TABLE IF NOT EXISTS `rate_limits` (
     `blocked_until` INT DEFAULT 0,
     INDEX (`ip_address`),
     INDEX (`blocked_until`)
+);
+
+-- Jobs Queue Table (for async tasks like emails)
+CREATE TABLE IF NOT EXISTS `jobs` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `type` VARCHAR(50) NOT NULL,
+    `payload` LONGTEXT NOT NULL,
+    `status` ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
+    `attempts` INT DEFAULT 0,
+    `last_error` TEXT,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Security Incidents Table
+CREATE TABLE IF NOT EXISTS `security_incidents` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `ip_address` VARCHAR(45) NOT NULL,
+    `incident_type` VARCHAR(50) NOT NULL, -- 'honeypot', 'rate_limit', 'captcha_fail', 'csrf_fail'
+    `severity` ENUM('low', 'medium', 'high', 'critical') DEFAULT 'low',
+    `details` TEXT,
+    `user_agent` TEXT,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

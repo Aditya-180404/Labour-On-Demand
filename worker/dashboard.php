@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
 $cld = CloudinaryHelper::getInstance();
@@ -12,6 +12,18 @@ if (!isset($_SESSION['worker_id'])) {
 
 $worker_id = $_SESSION['worker_id'];
 $success_msg = $error_msg = "";
+
+// Handle POST Requests
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // 1. Bot Detection
+    if (isBotDetected()) {
+        die("Security validation failed: Bot detected.");
+    }
+    // 2. CSRF Validation
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security validation failed. Please refresh and try again.");
+    }
+}
 
 // Handle Availability Toggle
 if (isset($_POST['toggle_availability'])) {
@@ -133,6 +145,8 @@ $next_job = $next_job_stmt->fetch();
                             <i class="fas <?php echo $worker['is_available'] ? 'fa-toggle-on text-success' : 'fa-toggle-off text-muted'; ?> fa-3x"></i>
                         </div>
                         <form method="POST">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
                             <div class="form-check form-switch d-flex justify-content-center mb-0">
                                 <input class="form-check-input h4 cursor-pointer" type="checkbox" name="is_available" value="1" onchange="this.form.submit();" <?php echo $worker['is_available'] ? 'checked' : ''; ?>>
                                 <input type="hidden" name="toggle_availability" value="1">
@@ -150,6 +164,8 @@ $next_job = $next_job_stmt->fetch();
                     <div class="card-body p-4 text-center">
                         <h6 class="text-muted text-uppercase small fw-bold mb-3">Share Location</h6>
                         <form method="POST" id="locationForm">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
                             <input type="hidden" name="latitude" id="workerLat">
                             <input type="hidden" name="longitude" id="workerLng">
                             <input type="hidden" name="update_location" value="1">

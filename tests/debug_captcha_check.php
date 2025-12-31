@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo "<p>Token received (length " . strlen($token) . "). Verifying...</p>";
         
         define('EXECUTION_ALLOWED', true);
-        require_once 'includes/captcha.php';
+        require_once 'includes/security/captcha.php';
         
         $is_valid = verifyCaptcha($token);
         echo "<p><strong>Verification Result: " . ($is_valid ? "<span style='color:green'>SUCCESS</span>" : "<span style='color:red'>FAILURE</span>") . "</strong></p>";

@@ -1,5 +1,5 @@
 <?php
-require_once 'config/security.php';
+require_once 'includes/security.php';
 require_once 'config/db.php';
 ?>
 <!DOCTYPE html>
@@ -195,15 +195,16 @@ require_once 'config/db.php';
 
 
     <!-- Categories Section -->
-    <section class="py-5">
+    <section class="py-5 overflow-hidden">
         <div class="container">
-            <h2 class="text-center mb-5 fw-bold">Popular Services</h2>
+            <h2 class="text-center mb-5 fw-bold reveal-fade">Popular Services</h2>
             <div class="row g-4">
                 <?php
                 $stm = $pdo->query("SELECT * FROM categories LIMIT 6");
+                $index = 0;
                 while($cat = $stm->fetch()):
                 ?>
-                <div class="col-6 col-md-4 col-lg-2">
+                <div class="col-6 col-md-4 col-lg-2 reveal-fade" data-delay="<?php echo $index * 100; ?>">
                     <a href="customer/workers.php?category=<?php echo $cat['id']; ?>" class="text-decoration-none">
                         <div class="card category-card text-center h-100 border-0 shadow-sm">
                             <div class="card-body">
@@ -213,20 +214,20 @@ require_once 'config/db.php';
                         </div>
                     </a>
                 </div>
-                <?php endwhile; ?>
+                <?php $index++; endwhile; ?>
             </div>
-            <div class="text-center mt-5">
+            <div class="text-center mt-5 reveal-fade" data-delay="500">
                 <a href="customer/services.php" class="btn btn-outline-primary rounded-pill px-4">View All Services</a>
             </div>
         </div>
     </section>
 
     <!-- Mechanics / How it Works -->
-    <section class="py-5 bg-body-tertiary">
+    <section class="py-5 bg-body-tertiary overflow-hidden">
         <div class="container">
-            <h2 class="text-center mb-5 fw-bold">How It Works</h2>
+            <h2 class="text-center mb-5 fw-bold reveal-fade">How It Works</h2>
             <div class="row text-center">
-                <div class="col-md-4 mb-4">
+                <div class="col-md-4 mb-4 reveal-fade" data-delay="0">
                     <div class="step-card p-4">
                         <div class="step-icon bg-body shadow-sm rounded-circle d-inline-flex align-items-center justify-content-center mb-4" style="width: 80px; height: 80px;">
                             <i class="fas fa-search fa-2x text-primary"></i>
@@ -235,7 +236,7 @@ require_once 'config/db.php';
                         <p class="text-muted">Choose from a wide range of services or search for a specific worker near you.</p>
                     </div>
                 </div>
-                <div class="col-md-4 mb-4">
+                <div class="col-md-4 mb-4 reveal-fade" data-delay="200">
                     <div class="step-card p-4">
                         <div class="step-icon bg-body shadow-sm rounded-circle d-inline-flex align-items-center justify-content-center mb-4" style="width: 80px; height: 80px;">
                             <i class="fas fa-calendar-check fa-2x text-primary"></i>
@@ -244,7 +245,7 @@ require_once 'config/db.php';
                         <p class="text-muted">Select a suitable time and date. Book your worker instantly.</p>
                     </div>
                 </div>
-                <div class="col-md-4 mb-4">
+                <div class="col-md-4 mb-4 reveal-fade" data-delay="400">
                     <div class="step-card p-4">
                         <div class="step-icon bg-body shadow-sm rounded-circle d-inline-flex align-items-center justify-content-center mb-4" style="width: 80px; height: 80px;">
                             <i class="fas fa-smile fa-2x text-primary"></i>
@@ -258,6 +259,21 @@ require_once 'config/db.php';
     </section>
 
     <?php include 'includes/stats_animation.php'; ?>
+
+    <!-- Become a Professional CTA -->
+    <section class="py-5 bg-primary text-white position-relative overflow-hidden">
+        <div class="container position-relative z-2 text-center">
+            <h2 class="display-5 fw-bold mb-3 reveal-fade">Are you a Professional?</h2>
+            <p class="lead mb-4 reveal-fade" data-delay="100">Join our network of expert workers and grow your business with us.</p>
+            <a href="worker/auth.php?mode=register" class="btn btn-light btn-lg rounded-pill px-5 fw-bold shadow-lg reveal-fade" data-delay="200">
+                Join our Network <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+        </div>
+        <!-- Background Decor -->
+        <i class="fas fa-hard-hat fa-10x position-absolute opacity-25" style="top: -50px; left: -50px; transform: rotate(-30deg);"></i>
+        <i class="fas fa-tools fa-10x position-absolute opacity-25" style="bottom: -50px; right: -50px; transform: rotate(15deg);"></i>
+    </section>
+
     <?php include 'includes/footer.php'; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -286,16 +302,6 @@ require_once 'config/db.php';
             setTimeout(typeWriter, 500); // Start after 500ms delay
         });
         
-        // Generate Dot Matrix - REMOVED for SVG Background
-        /*
-        const dotMatrix = document.getElementById('dotMatrix');
-        const dotCount = 100;
-        
-        for (let i = 0; i < dotCount; i++) {
-        ...
-        }
-        */
-        
         // Optimized Parallax Effect with requestAnimationFrame
         let mouseX = 0, mouseY = 0;
         let ticking = false;
@@ -318,6 +324,21 @@ require_once 'config/db.php';
                 ticking = true;
             }
         });
+        
+        // Global Scroll Reveal Handler
+        const globalRevealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const delay = entry.target.getAttribute('data-delay') || 0;
+                    setTimeout(() => {
+                        entry.target.classList.add('revealed');
+                    }, delay);
+                    globalRevealObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.reveal-fade').forEach(el => globalRevealObserver.observe(el));
     </script>
 </body>
 </html>

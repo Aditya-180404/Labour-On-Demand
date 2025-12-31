@@ -1,6 +1,6 @@
 <?php
-require_once '../config/security.php';
-require_once '../config/db.php';
+$path_prefix = '../';
+require_once $path_prefix . 'includes/security.php';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -15,8 +15,7 @@ require_once '../config/db.php';
 </head>
 <body>
     <?php 
-    $path_prefix = '../';
-    include '../includes/navbar.php'; 
+    include $path_prefix . 'includes/navbar.php'; 
     ?>
 
     <div class="container py-5">

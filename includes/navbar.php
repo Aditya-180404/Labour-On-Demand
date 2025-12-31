@@ -1,6 +1,43 @@
 <?php if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.'); ?>
+<!-- Noscript Fallback Guidance -->
+<noscript>
+    <div style="background-color: #ffc107; color: #000; padding: 10px; text-align: center; position: sticky; top: 0; z-index: 9999; font-weight: bold;">
+        <i class="fas fa-exclamation-triangle"></i> JavaScript is disabled. For security features like Login and OTP to work, please enable JavaScript in your browser.
+    </div>
+</noscript>
+
+<!-- Font Awesome Fallback Script -->
+<script>
+    (function() {
+        const testElem = document.createElement('span');
+        testElem.className = 'fa';
+        testElem.style.display = 'none';
+        document.body.insertBefore(testElem, document.body.firstChild);
+        
+        const isLoaded = window.getComputedStyle(testElem).fontFamily.includes('Font Awesome');
+        document.body.removeChild(testElem);
+        
+        if (!isLoaded) {
+            console.warn('Font Awesome failed to load from CDN. Using text fallback.');
+            document.documentElement.classList.add('fa-failed');
+        }
+    })();
+</script>
+
+<style>
+    /* CSS Fallback for icons if FA fails */
+    .fa-failed .fas::before, .fa-failed .far::before, .fa-failed .fab::before {
+        content: '[' attr(data-icon-name) ']' !important;
+        font-family: inherit !important;
+        font-size: 10px !important;
+        font-weight: normal !important;
+    }
+</style>
+
 <link rel="stylesheet" href="<?php echo $path_prefix; ?>assets/css/navbar.css">
 <link rel="stylesheet" href="<?php echo $path_prefix; ?>assets/css/theme.css">
+<link rel="stylesheet" href="<?php echo $path_prefix; ?>assets/css/animations.css">
+
 <?php
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -139,9 +176,16 @@ $is_admin_path = strpos($_SERVER['REQUEST_URI'], '/admin/') !== false;
                      <li class="nav-item ms-lg-3"><a class="nav-link btn btn-danger btn-sm text-white fw-bold px-3 py-1 rounded-pill mt-2 mt-lg-0 shadow-sm" href="<?php echo $path_prefix; ?>logout.php">Logout</a></li>
                 <?php else: ?>
                     <li class="nav-item ms-lg-3">
-                        <a class="nav-link btn btn-light text-primary fw-bold px-4 py-1 rounded-pill mt-2 mt-lg-0 shadow-sm border-0" href="<?php echo $path_prefix; ?>customer/login.php">
+                        <a class="nav-link fw-bold" href="<?php echo $path_prefix; ?>worker/auth.php?mode=register">Join as Worker</a>
+                    </li>
+                    <li class="nav-item dropdown ms-lg-3">
+                        <a class="nav-link dropdown-toggle btn btn-light text-primary fw-bold px-4 py-1 rounded-pill mt-2 mt-lg-0 shadow-sm border-0" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-sign-in-alt me-1"></i>Login
                         </a>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 rounded-4 mt-2">
+                            <li><a class="dropdown-item py-2" href="<?php echo $path_prefix; ?>customer/auth.php"><i class="fas fa-user me-2 text-primary"></i>Customer Login</a></li>
+                            <li><a class="dropdown-item py-2" href="<?php echo $path_prefix; ?>worker/auth.php"><i class="fas fa-hard-hat me-2 text-warning"></i>Worker Login</a></li>
+                        </ul>
                     </li>
                 <?php endif; ?>
                 

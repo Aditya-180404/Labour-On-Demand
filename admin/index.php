@@ -1,8 +1,7 @@
 <?php
 $path_prefix = '../';
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
-require_once '../includes/captcha.php';
 
 // If already logged in, go to dashboard
 if (isset($_SESSION['admin_logged_in'])) {
@@ -17,8 +16,18 @@ if (!isset($_GET['entry']) || $_GET['entry'] !== '1g2g4g6i3g4g5g56774b') {
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Validate CSRF Token
-    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+    // 1. Honeypot/Bot Detection
+    if (isBotDetected()) {
+        $error = "Bot detected. Access denied.";
+    }
+    // 1b. Special Admin Trap Password (Bots love 'password' fields)
+    elseif (!empty($_POST['admin_trap_password'])) {
+        logSecurityIncident('admin_honeypot', 'critical', "Admin Trap Password triggered by " . get_client_ip());
+        blockIP(get_client_ip(), "Admin Honeypot Triggered", 86400); // 24 hour ban
+        $error = "Security Violation: Your activity has been logged.";
+    }
+    // 2. Validate CSRF Token
+    elseif (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
         $error = "Invalid CSRF token. Please refresh the page and try again.";
     }
     // Validate CAPTCHA
@@ -37,14 +46,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $stmt->execute([$username]);
             $admin = $stmt->fetch();
 
-            if ($admin && password_verify($password, $admin['password'])) {
+            if (!checkLoginRateLimit($pdo) || (isset($_SESSION['admin_login_fails']) && $_SESSION['admin_login_fails'] >= 3)) {
+                $error = "Too many login attempts. Access denied for your IP for 30 minutes.";
+                if (!isset($_SESSION['admin_locked_logged'])) {
+                    blockIP(get_client_ip(), "Admin Brute-Force (3 fails)", 1800);
+                    $_SESSION['admin_locked_logged'] = true;
+                }
+            } elseif ($admin && password_verify($password, $admin['password'])) {
                 $_SESSION['admin_logged_in'] = true;
                 $_SESSION['admin_id'] = $admin['id'];
                 $_SESSION['admin_username'] = $admin['username'];
+                session_regenerate_id(true); // Prevent session fixation
+                unset($_SESSION['admin_login_fails']); // Reset fails on success
+                rotateCSRF(); // Security Enhancement: Rotate token on successful login
                 header("Location: dashboard.php");
                 exit;
             } else {
-                $error = "Invalid credentials.";
+                $_SESSION['admin_login_fails'] = ($_SESSION['admin_login_fails'] ?? 0) + 1;
+                incrementLoginAttempts($pdo);
+                $error = "Invalid credentials. Attempt " . $_SESSION['admin_login_fails'] . " of 3.";
             }
         }
     }
@@ -75,7 +95,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
                         <form action="index.php?entry=1g2g4g6i3g4g5g56774b" method="POST">
-                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
                             <div class="mb-3">
                                 <label for="username" class="form-label">Username</label>
                                 <input type="text" class="form-control" id="username" name="username" required>
@@ -89,8 +110,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     </button>
                                 </div>
                             </div>
+                            <!-- Admin Trap Honeypot -->
+                            <div style="display:none; visibility:hidden; height:0; overflow:hidden;">
+                                <label>Leave this empty</label>
+                                <input type="password" name="admin_trap_password" tabindex="-1" autocomplete="off">
+                            </div>
                             <div class="mb-3 text-center">
-                                <div class="g-recaptcha d-inline-block" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                                <div class="g-recaptcha d-inline-block" data-sitekey="6LfUczssAAAAAJAyN5ozYXwMRzPfmfnzex9NRLdu"></div>
                             </div>
                             <button type="submit" class="btn btn-danger w-100">Login</button>
                         </form>

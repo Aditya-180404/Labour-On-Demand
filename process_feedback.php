@@ -1,5 +1,5 @@
 <?php
-require_once 'config/security.php';
+require_once 'includes/security.php';
 require_once 'config/db.php';
 
 header('Content-Type: application/json');
@@ -10,10 +10,9 @@ if (!isset($_SESSION['user_id']) && !isset($_SESSION['worker_id'])) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    require_once 'includes/captcha.php';
     
     // Honeypot check
-    if (!empty($_POST['middle_name'])) {
+    if (isBotDetected()) {
         echo json_encode(['status' => 'error', 'message' => 'Bot detected.']);
         exit;
     }
@@ -65,7 +64,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             echo json_encode(['status' => 'error', 'message' => 'Something went wrong.']);
         }
     } catch (PDOException $e) {
-        echo json_encode(['status' => 'error', 'message' => 'Database error: ' . $e->getMessage()]);
+        logSecurityIncident('database_error', 'medium', 'Feedback submission failed: ' . $e->getMessage());
+        echo json_encode(['status' => 'error', 'message' => 'An internal error occurred. Please try again later.']);
     }
 } else {
     echo json_encode(['status' => 'error', 'message' => 'Invalid request method.']);

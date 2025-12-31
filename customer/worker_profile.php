@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
 require_once '../includes/cloudinary_helper.php';
@@ -70,6 +70,18 @@ $booking_error = "";
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     if (!$is_user) {
         header("Location: login.php");
+        exit;
+    }
+
+    if (isBotDetected()) {
+        $_SESSION['toast_error'] = "Bot detected. Access denied.";
+        header("Location: worker_profile.php?id=" . $worker_id);
+        exit;
+    }
+
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        $_SESSION['toast_error'] = "Security validation failed. Please refresh and try again.";
+        header("Location: worker_profile.php?id=" . $worker_id);
         exit;
     }
 
@@ -149,7 +161,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
                             <li><strong>Location:</strong> $address</li>
                         </ul>
                         <p>Please login to your dashboard to <strong>Accept</strong> or <strong>Reject</strong> this job.</p>
-                        <a href='" . getBaseUrl() . "worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
+                        <a href='../worker/dashboard.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #fd7e14; text-decoration: none; border-radius: 5px;'>View Dashboard</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -343,35 +355,46 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
             <div class="col-lg-6">
                 <?php if ($is_user && $worker['status'] == 'approved'): ?>
                 <div class="booking-card shadow-sm border-0">
-                    <h4 class="mb-4 fw-bold">Book this Worker</h4>
-                    <form method="POST" id="bookingForm">
-                        <div class="mb-3">
-                            <label class="form-label">Select Date</label>
-                            <input type="date" name="date" class="form-control rounded-pill px-3" min="<?php echo date('Y-m-d'); ?>" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Select Time</label>
-                            <input type="time" name="time" class="form-control rounded-pill px-3" min="08:00" max="20:00" required>
-                            <div class="form-text small opacity-75">Work sessions must be between 8 AM and 9 PM.</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Service Location</label>
-                            <div class="d-flex flex-column gap-2 mb-2">
-                                <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="useRegisteredAddress()">
-                                    <i class="fas fa-home me-1"></i> Use Registered Address
-                                </button>
-                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill" onclick="useCurrentLocation(event)">
-                                    <i class="fas fa-location-arrow me-1"></i> Send Current GPS Location
-                                </button>
+                    <?php if ($worker['is_available']): ?>
+                        <h4 class="mb-4 fw-bold">Book this Worker</h4>
+                        <form method="POST" id="bookingForm">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
+                            <div class="mb-3">
+                                <label class="form-label">Select Date</label>
+                                <input type="date" name="date" class="form-control rounded-pill px-3" min="<?php echo date('Y-m-d'); ?>" required>
                             </div>
-                            <textarea name="address" id="address" class="form-control rounded-3 px-3" rows="3" placeholder="Enter service address" required></textarea>
-                            <input type="hidden" name="latitude" id="latitude">
-                            <input type="hidden" name="longitude" id="longitude">
+                            <div class="mb-3">
+                                <label class="form-label">Select Time</label>
+                                <input type="time" name="time" class="form-control rounded-pill px-3" min="08:00" max="20:00" required>
+                                <div class="form-text small opacity-75">Work sessions must be between 8 AM and 9 PM.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Service Location</label>
+                                <div class="d-flex flex-column gap-2 mb-2">
+                                    <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="useRegisteredAddress()">
+                                        <i class="fas fa-home me-1"></i> Use Registered Address
+                                    </button>
+                                    <button type="button" class="btn btn-outline-success btn-sm rounded-pill" onclick="useCurrentLocation(event)">
+                                        <i class="fas fa-location-arrow me-1"></i> Send Current GPS Location
+                                    </button>
+                                </div>
+                                <textarea name="address" id="address" class="form-control rounded-3 px-3" rows="3" placeholder="Enter service address" required></textarea>
+                                <input type="hidden" name="latitude" id="latitude">
+                                <input type="hidden" name="longitude" id="longitude">
+                            </div>
+                            <button type="submit" name="book_worker" class="btn btn-warning w-100 rounded-pill py-2 fw-bold">
+                                <i class="fas fa-calendar-check me-2"></i>Book Now
+                            </button>
+                        </form>
+                    <?php else: ?>
+                        <div class="text-center py-5 opacity-75">
+                            <i class="fas fa-user-slash fa-4x text-muted mb-3 opacity-50"></i>
+                            <h4 class="fw-bold text-muted">Currently Unavailable</h4>
+                            <p class="text-muted small mb-0">This worker is currently offline and not accepting new booking requests.</p>
+                            <div class="mt-3 badge bg-secondary">Status: Busy / Offline</div>
                         </div>
-                        <button type="submit" name="book_worker" class="btn btn-warning w-100 rounded-pill py-2 fw-bold">
-                            <i class="fas fa-calendar-check me-2"></i>Book Now
-                        </button>
-                    </form>
+                    <?php endif; ?>
                 </div>
                 <?php endif; ?>
             </div>
@@ -392,51 +415,98 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
         function useCurrentLocation(event) {
             const btn = event.currentTarget;
             const originalText = btn.innerHTML;
-            btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Getting location...";
+            btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Acquiring GPS...";
             btn.disabled = true;
 
+            // Check for HTTPS
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                const warningMsg = document.createElement('div');
+                warningMsg.className = 'alert alert-warning mt-2 small p-2';
+                warningMsg.innerHTML = "<i class='fas fa-exclamation-triangle'></i> <strong>Security Warning:</strong> Location sharing may fail because this site is not using HTTPS. Please verify your browser permissions.";
+                 // If there's already an alert, remove it
+                const existingAlert = btn.parentNode.querySelector('.alert');
+                if(existingAlert) existingAlert.remove();
+                btn.parentNode.appendChild(warningMsg);
+            }
+
             if (!navigator.geolocation) {
-                alert("Geolocation not supported by your browser");
+                alert("Geolocation is not supported by your browser.");
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             } else {
+                const options = {
+                    enableHighAccuracy: true,
+                    timeout: 20000, 
+                    maximumAge: 0
+                };
+
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
                         const lat = position.coords.latitude;
                         const lng = position.coords.longitude;
                         const accuracy = position.coords.accuracy;
+                        
                         document.getElementById('latitude').value = lat;
                         document.getElementById('longitude').value = lng;
                         
                         // Set address field
                         const addrField = document.getElementById('address');
-                        if (addrField.value === "" || addrField.value.includes("GPS Location Shared")) {
-                            addrField.value = "GPS Location Shared (" + lat.toFixed(6) + ", " + lng.toFixed(6) + ")";
+                        
+                        // Smart update: Don't overwrite if user typed details, append in brackets
+                        let currentVal = addrField.value;
+                        if(currentVal.includes("GPS Location Shared")) {
+                            // Reset to empty to stricter format
+                             currentVal = ""; 
+                        }
+                        
+                        const locString = `GPS Location Shared (Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}, Accuracy: ${Math.round(accuracy)}m)`;
+                        
+                        if (currentVal.trim() === "") {
+                            addrField.value = locString;
+                        } else {
+                            addrField.value = currentVal + "\n" + locString;
                         }
                         
                         // Update button style and provide verification link
-                        btn.innerHTML = "<i class='fas fa-check'></i> Location Captured (<a href='https://www.google.com/maps?q=" + lat + "," + lng + "' target='_blank' class='text-white text-decoration-underline'>Verify on Map</a>)";
+                        btn.innerHTML = "<i class='fas fa-check'></i> Location Sent";
                         btn.classList.replace('btn-outline-success', 'btn-success');
                         
-                        if (accuracy > 100) {
+                        // Remove old alerts
+                        const existingAlert = btn.parentNode.querySelector('.alert');
+                        if(existingAlert) existingAlert.remove();
+
+                        // Accuracy warning
+                        if (accuracy > 500) {
                             const warningMsg = document.createElement('div');
+                            warningMsg.className = 'alert alert-danger mt-2 small p-2';
+                            warningMsg.innerHTML = "<i class='fas fa-exclamation-circle'></i> <strong>Low Accuracy:</strong> Your location is off by " + Math.round(accuracy) + " meters. Please confirm your address manually.";
+                            btn.parentNode.appendChild(warningMsg);
+                        } else if (accuracy > 50) {
+                             const warningMsg = document.createElement('div');
                             warningMsg.className = 'alert alert-info mt-2 small p-2';
-                            warningMsg.innerHTML = "<i class='fas fa-info-circle'></i> <strong>Low Accuracy:</strong> Your location is accurate within " + Math.round(accuracy) + " meters. Please check the map or enter your full address manually.";
+                            warningMsg.innerHTML = "<i class='fas fa-info-circle'></i> <strong>Moderate Accuracy:</strong> Your location is accurate within " + Math.round(accuracy) + " meters.";
                             btn.parentNode.appendChild(warningMsg);
                         }
                     },
                     (error) => {
                         let msg = "Error: " + error.message;
-                        if (error.code === 1) msg = "Permission denied. Please allow location access.";
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                msg = "Location request denied. Please allow site access to location in your browser settings.";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                msg = "Location information is unavailable.";
+                                break;
+                            case error.TIMEOUT:
+                                msg = "The request to get user location timed out. Try moving outdoors.";
+                                break;
+                        }
                         alert(msg);
+                        console.error("Geo Error:", error);
                         btn.innerHTML = originalText;
                         btn.disabled = false;
                     },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 0
-                    }
+                    options
                 );
             }
         }

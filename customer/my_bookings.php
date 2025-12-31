@@ -1,6 +1,7 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
+require_once '../includes/mailer.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -13,7 +14,12 @@ $success_msg = $error_msg = "";
 
 // Handle Cancellation
 if (isset($_POST['cancel_booking']) && isset($_POST['booking_id'])) {
-    $booking_id = $_POST['booking_id'];
+    if (isBotDetected()) {
+        $error_msg = "Security validation failed: Bot detected.";
+    } elseif (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        $error_msg = "Security validation failed. Please refresh and try again.";
+    } else {
+        $booking_id = $_POST['booking_id'];
     
     // Verify booking belongs to user and is pending
     $verify_stmt = $pdo->prepare("SELECT id FROM bookings WHERE id = ? AND user_id = ? AND status = 'pending'");
@@ -23,25 +29,61 @@ if (isset($_POST['cancel_booking']) && isset($_POST['booking_id'])) {
         $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?");
         if ($update_stmt->execute([$booking_id])) {
             $success_msg = "Booking cancelled successfully.";
+            
+            // NOTIFY WORKER
+            $w_stmt = $pdo->prepare("SELECT name, email FROM workers WHERE id = (SELECT worker_id FROM bookings WHERE id = ?)");
+            $w_stmt->execute([$booking_id]);
+            $worker = $w_stmt->fetch();
+            if ($worker) {
+                $subject = "Booking Cancelled - Labour On Demand";
+                $message = "Booking #BK-{$booking_id} has been cancelled by the customer.";
+                sendEmail($worker['email'], $worker['name'], $subject, $message);
+            }
         } else {
             $error_msg = "Failed to cancel booking.";
         }
     } else {
         $error_msg = "Cannot cancel this booking.";
     }
+    }
 }
+// End of POST Handler
 
+// Fetch Booking Summary
 // Fetch Active Bookings (Pending, Accepted)
-$active_stmt = $pdo->prepare("
-    SELECT b.*, w.name as worker_name, w.phone as worker_phone, w.worker_uid, c.name as category_name 
-    FROM bookings b 
-    JOIN workers w ON b.worker_id = w.id 
-    LEFT JOIN categories c ON w.service_category_id = c.id
-    WHERE b.user_id = ? AND (b.status = 'pending' OR b.status = 'accepted') 
-    ORDER BY b.service_date ASC
+try {
+    // Try querying with new location columns
+    $active_stmt = $pdo->prepare("
+        SELECT b.*, w.name as worker_name, w.phone as worker_phone, w.worker_uid, c.name as category_name, 
+               b.worker_shared_lat, b.worker_shared_lng, b.worker_shared_at
+        FROM bookings b 
+        JOIN workers w ON b.worker_id = w.id 
+        LEFT JOIN categories c ON w.service_category_id = c.id
+        WHERE b.user_id = ? AND (b.status = 'pending' OR b.status = 'accepted') 
+        ORDER BY b.service_date ASC
     ");
-$active_stmt->execute([$user_id]);
-$active_bookings = $active_stmt->fetchAll();
+    $active_stmt->execute([$user_id]);
+    $active_bookings = $active_stmt->fetchAll();
+} catch (PDOException $e) {
+    // Fallback if columns missing (Migration not run)
+    $active_stmt = $pdo->prepare("
+        SELECT b.*, w.name as worker_name, w.phone as worker_phone, w.worker_uid, c.name as category_name
+        FROM bookings b 
+        JOIN workers w ON b.worker_id = w.id 
+        LEFT JOIN categories c ON w.service_category_id = c.id
+        WHERE b.user_id = ? AND (b.status = 'pending' OR b.status = 'accepted') 
+        ORDER BY b.service_date ASC
+    ");
+    $active_stmt->execute([$user_id]);
+    $active_bookings = $active_stmt->fetchAll();
+    
+    // Polyfill missing keys to avoid undefined index warnings in view
+    foreach ($active_bookings as &$bk) {
+        $bk['worker_shared_lat'] = null;
+        $bk['worker_shared_lng'] = null;
+        $bk['worker_shared_at'] = null;
+    }
+}
 
 // Fetch History (Completed, Rejected, Cancelled)
 $history_stmt = $pdo->prepare("
@@ -138,7 +180,7 @@ $history_bookings = $history_stmt->fetchAll();
                                         <h5 class="card-title mb-1"><?php echo htmlspecialchars($booking['category_name']); ?> Service <small class="text-muted ms-2">#BK-<?php echo $booking['id']; ?></small></h5>
                                         <p class="mb-1 text-muted">
                                             <i class="fas fa-user-hard-hat me-2 text-primary"></i><?php echo htmlspecialchars($booking['worker_name']); ?> 
-                                            <span class="badge bg-light text-dark border font-monospace ms-2">ID: <?php echo htmlspecialchars($booking['worker_uid']); ?></span>
+                                            <span class="badge bg-info text-dark border font-monospace ms-2">ID: <?php echo htmlspecialchars($booking['worker_uid']); ?></span>
                                         </p>
                                         <p class="mb-0 small"><i class="far fa-clock me-2"></i><?php echo date('h:i A', strtotime($booking['service_time'])); ?> at <span class="text-truncate d-inline-block align-bottom" style="max-width: 250px;"><?php echo htmlspecialchars($booking['address']); ?></span></p>
                                     </div>
@@ -146,12 +188,22 @@ $history_bookings = $history_stmt->fetchAll();
                                         <?php if($booking['status'] == 'pending'): ?>
                                             <span class="badge bg-warning text-dark mb-2 d-block">Pending Approval</span>
                                             <form method="POST">
+                                                <?php echo csrf_input(); ?>
                                                 <input type="hidden" name="booking_id" value="<?php echo $booking['id']; ?>">
                                                 <button type="submit" name="cancel_booking" value="1" class="btn btn-outline-danger btn-sm w-100 rounded-pill" onclick="return confirm('Are you sure you want to cancel?')">Cancel</button>
                                             </form>
                                         <?php else: ?>
                                             <span class="badge bg-success mb-2 d-block">Confirmed</span>
                                             <a href="tel:<?php echo htmlspecialchars($booking['worker_phone']); ?>" class="btn btn-primary btn-sm w-100 rounded-pill"><i class="fas fa-phone me-1"></i> Call Worker</a>
+                                            
+                                            <?php if(!empty($booking['worker_shared_lat']) && !empty($booking['worker_shared_lng'])): ?>
+                                                <div class="mt-2">
+                                                    <a href="https://www.google.com/maps?q=<?php echo $booking['worker_shared_lat']; ?>,<?php echo $booking['worker_shared_lng']; ?>" target="_blank" class="btn btn-info btn-sm w-100 rounded-pill text-white shadow-sm">
+                                                        <i class="fas fa-map-marked-alt me-1"></i> View Live Location
+                                                        <div style="font-size: 0.65rem; opacity: 0.9;">Updated: <?php echo date('h:i A', strtotime($booking['worker_shared_at'])); ?></div>
+                                                    </a>
+                                                </div>
+                                            <?php endif; ?>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -184,13 +236,15 @@ $history_bookings = $history_stmt->fetchAll();
                                             <small class="text-muted d-block"><i class="fas fa-hard-hat me-1"></i><?php echo htmlspecialchars($booking['worker_name']); ?></small>
                                             <small class="text-muted font-monospace" style="font-size: 0.75rem;">Worker ID: <?php echo htmlspecialchars($booking['worker_uid']); ?></small>
                                         </div>
-                                        <span class="badge bg-<?php 
-                                            echo match($booking['status']) {
-                                                'completed' => 'success',
-                                                'cancelled' => 'warning',
-                                                'rejected' => 'danger',
-                                                default => 'secondary'
-                                            };
+                                        <span class="badge <?php 
+                                            switch($booking['status']) {
+                                                case 'pending': echo 'bg-warning text-dark'; break;
+                                                case 'accepted': echo 'bg-info'; break;
+                                                case 'completed': echo 'bg-success'; break;
+                                                case 'rejected':
+                                                case 'cancelled': echo 'bg-danger'; break;
+                                                default: echo 'bg-secondary'; break;
+                                            }
                                         ?> rounded-pill"><?php echo ucfirst($booking['status']); ?></span>
                                     </div>
                                     <?php if($booking['status'] == 'completed'): ?>
@@ -232,6 +286,8 @@ $history_bookings = $history_stmt->fetchAll();
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form action="submit_review.php" method="POST">
+                <?php echo csrf_input(); ?>
+                <?php renderHoneypot(); ?>
                 <div class="modal-body p-4">
                     <p class="text-muted mb-4">How was your experience with <span id="modalWorkerName" class="fw-bold text-dark"></span>?</p>
                     <input type="hidden" name="booking_id" id="modalBookingId">

@@ -1,7 +1,12 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
+
+// DEBUGGING: Enable Error Reporting
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
 // Check Worker Login
 if (!isset($_SESSION['worker_id'])) {
@@ -15,6 +20,13 @@ $error = "";
 
 // Handle OTP Generation for Profile Update (AJAX endpoint)
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
+    // CSRF Protection for AJAX
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'error', 'message' => 'Security Validation Failed (CSRF).']);
+        exit;
+    }
+
     require_once '../includes/mailer.php';
     
     $stmt = $pdo->prepare("SELECT email, name FROM workers WHERE id = ?");
@@ -24,8 +36,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
     $otp = rand(100000, 999999);
     $expiry = date("Y-m-d H:i:s", strtotime("+10 minutes"));
     
+    // Store Hashed OTP
+    $hashed_otp = hash_hmac('sha256', (string)$otp, OTP_SECRET_KEY);
     $pdo->prepare("UPDATE workers SET otp = ?, otp_expires_at = ? WHERE id = ?")
-        ->execute([$otp, $expiry, $worker_id]);
+        ->execute([$hashed_otp, $expiry, $worker_id]);
     
     $mail_result = sendOTPEmail($worker_data['email'], $otp, $worker_data['name']);
     header('Content-Type: application/json');
@@ -37,7 +51,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_profile_otp'])) {
 }
 
 // Handle Form Submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['send_profile_otp'])) {
+    // 1. Bot Detection
+    if (isBotDetected()) {
+        die("Security validation failed: Bot detected.");
+    }
+    // 2. CSRF Protection
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security Validation Failed (CSRF). Please refresh the page.");
+    }
+
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
     $new_password = $_POST['new_password'];
@@ -48,30 +71,56 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $pin_codes_input = trim($_POST['pin_code']);
     $working_location = trim($_POST['working_location']);
     $otp_entered = trim($_POST['profile_otp'] ?? '');
-
-    // Check if sensitive fields changed
-    $stmt = $pdo->prepare("SELECT email, password FROM workers WHERE id = ?");
-    $stmt->execute([$worker_id]);
-    $current_worker = $stmt->fetch();
-
-    $email_changed = ($email !== $current_worker['email']);
+    
     $password_changed = !empty($new_password);
 
-    if ($email_changed || $password_changed) {
+    // 1. Detect Sensitive Changes (Contact & Identity)
+    $stmt = $pdo->prepare("SELECT * FROM workers WHERE id = ?");
+    $stmt->execute([$worker_id]);
+    $curr = $stmt->fetch();
+
+    $sensitive_changed = false;
+    $fields_to_check = [
+        'email' => $email,
+        'phone' => $phone,
+        'adhar_card' => $adhar_card ?? $curr['adhar_card'] ?? '',
+        'address' => $address
+    ];
+
+    foreach ($fields_to_check as $field => $val) {
+        if ($val !== $curr[$field]) {
+            $sensitive_changed = true;
+            break;
+        }
+    }
+
+    // Check if any NEW documents are being uploaded
+    $files_to_check = ['profile_image', 'aadhar_photo', 'pan_photo', 'signature_photo'];
+    foreach ($files_to_check as $file_field) {
+        if (isset($_FILES[$file_field]) && $_FILES[$file_field]['error'] === 0) {
+            $sensitive_changed = true;
+            break;
+        }
+    }
+
+    if (!empty($new_password)) $sensitive_changed = true;
+
+    if ($sensitive_changed) {
         // Verify OTP
         $stmt_otp = $pdo->prepare("SELECT otp, otp_expires_at FROM workers WHERE id = ?");
         $stmt_otp->execute([$worker_id]);
         $otp_data = $stmt_otp->fetch();
 
-        if (empty($otp_entered) || $otp_data['otp'] !== $otp_entered || strtotime($otp_data['otp_expires_at']) < time()) {
-            $error = "Invalid or expired OTP. Please verify your identity to change email/password.";
+        $entered_hash = hash_hmac('sha256', (string)$otp_entered, OTP_SECRET_KEY);
+        if (empty($otp_entered) || !hash_equals($otp_data['otp'] ?? '', $entered_hash) || strtotime($otp_data['otp_expires_at'] ?? '') < time()) {
+            $error = "Verification Required: Please enter a valid OTP to change sensitive information (Email, Phone, Address, Password, or Identity Documents).";
         } else {
             // Clear OTP after successful verification
             $pdo->prepare("UPDATE workers SET otp = NULL WHERE id = ?")->execute([$worker_id]);
         }
         
-        // Check email uniqueness if changed
-        if ($email_changed) {
+        // Email uniqueness if changed
+        if ($email !== $curr['email']) {
             $stmt_check = $pdo->prepare("SELECT id FROM workers WHERE email = ? AND id != ?");
             $stmt_check->execute([$email, $worker_id]);
             if ($stmt_check->fetch()) {
@@ -209,56 +258,108 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if (!preg_match('/^\d{10}$/', $phone)) {
         $error = "Phone number must be exactly 10 digits.";
-    } elseif ($hourly_rate < 0) {
-        $error = "Hourly rate cannot be negative.";
+    } elseif ($hourly_rate <= 0) {
+        $error = "Hourly rate must be greater than zero.";
     }
 
     if (!$error) {
-        // Prepare Query
-        $sql = "UPDATE workers SET name = ?, email = ?, phone = ?, hourly_rate = ?, bio = ?, address = ?, pin_code = ?, working_location = ?";
-        $params = [$name, $email, $phone, $hourly_rate, $bio, $address, $pin_code, $working_location];
-
-        if ($password_changed) {
-            $sql .= ", password = ?";
-            $params[] = password_hash($new_password, PASSWORD_DEFAULT);
+        $changes = [];
+        // Compare text fields (using $curr)
+        if ($name != $curr['name']) $changes['name'] = $name;
+        if ($email != $curr['email']) $changes['email'] = $email;
+        if ($phone != $curr['phone']) $changes['phone'] = $phone;
+        if ($hourly_rate != $curr['hourly_rate']) $changes['hourly_rate'] = $hourly_rate;
+        if ($bio != $curr['bio']) $changes['bio'] = $bio;
+        if ($address != $curr['address']) $changes['address'] = $address;
+        
+        // Strict PIN Code Logic: Ensure they are numbers
+        $clean_pins = [];
+        $raw_pins = explode(',', $pin_code);
+        foreach($raw_pins as $p) {
+            $p = preg_replace('/\D/', '', $p); // Remove non-digits
+            if (strlen($p) == 6) $clean_pins[] = $p;
         }
+        $final_pin_str = implode(',', array_unique($clean_pins));
+        if ($final_pin_str != $curr['pin_code']) $changes['pin_code'] = $final_pin_str;
+        
+        if ($working_location != $curr['working_location']) $changes['working_location'] = $working_location;
+        
+        try {
+            $pdo->beginTransaction();
 
-        $sql .= ", previous_work_images = ?, previous_work_public_ids = ?";
-        $params[] = $previous_work_images_str;
-        $params[] = $previous_work_public_ids_str;
+            if ($password_changed) {
+                $stmt = $pdo->prepare("UPDATE workers SET password = ? WHERE id = ?");
+                $stmt->execute([password_hash($new_password, PASSWORD_DEFAULT), $worker_id]);
+            }
 
-        if ($has_pending_docs) {
-            $sql .= ", doc_update_status = 'pending'";
-            if ($pending_profile_image_url) {
-                $sql .= ", pending_profile_image = ?, pending_profile_image_public_id = ?";
-                $params[] = $pending_profile_image_url;
-                $params[] = $pending_profile_image_public_id;
-            }
-            if ($pending_aadhar_photo_url) {
-                $sql .= ", pending_aadhar_photo = ?, pending_aadhar_photo_public_id = ?";
-                $params[] = $pending_aadhar_photo_url;
-                $params[] = $pending_aadhar_photo_public_id;
-            }
-            if ($pending_pan_photo_url) {
-                $sql .= ", pending_pan_photo = ?, pending_pan_photo_public_id = ?";
-                $params[] = $pending_pan_photo_url;
-                $params[] = $pending_pan_photo_public_id;
-            }
-            if ($pending_signature_photo_url) {
-                $sql .= ", pending_signature_photo = ?, pending_signature_photo_public_id = ?";
-                $params[] = $pending_signature_photo_url;
-                $params[] = $pending_signature_photo_public_id;
-            }
-        }
+            $stmt = $pdo->prepare("UPDATE workers SET previous_work_images = ?, previous_work_public_ids = ? WHERE id = ?");
+            $stmt->execute([$previous_work_images_str, $previous_work_public_ids_str, $worker_id]);
 
-        $sql .= " WHERE id = ?";
-        $params[] = $worker_id;
+            $update_query_parts = [];
+            $update_params = [];
 
-        $stmt = $pdo->prepare($sql);
-        if ($stmt->execute($params)) {
-             $success = "Profile updated successfully! Critical changes will be live after admin approval.";
-        } else {
-            $error = "Failed to update database.";
+            // 1. Text Changes -> Pending JSON
+            if (!empty($changes)) {
+                $existing_pending = json_decode($curr['pending_updates'] ?? '{}', true);
+                if (!is_array($existing_pending)) $existing_pending = [];
+                
+                $final_pending = array_merge($existing_pending, $changes);
+                
+                $update_query_parts[] = "pending_updates = ?";
+                $update_params[] = json_encode($final_pending);
+                $update_query_parts[] = "doc_update_status = 'pending'"; 
+            }
+
+            // 2. Document Changes
+            if ($has_pending_docs) {
+                $update_query_parts[] = "doc_update_status = 'pending'"; 
+                if ($pending_profile_image_url) {
+                    $update_query_parts[] = "pending_profile_image = ?, pending_profile_image_public_id = ?";
+                    $update_params[] = $pending_profile_image_url;
+                    $update_params[] = $pending_profile_image_public_id;
+                }
+                if ($pending_aadhar_photo_url) {
+                    $update_query_parts[] = "pending_aadhar_photo = ?, pending_aadhar_photo_public_id = ?";
+                    $update_params[] = $pending_aadhar_photo_url;
+                    $update_params[] = $pending_aadhar_photo_public_id;
+                }
+                if ($pending_pan_photo_url) {
+                     $update_query_parts[] = "pending_pan_photo = ?, pending_pan_photo_public_id = ?";
+                    $update_params[] = $pending_pan_photo_url;
+                    $update_params[] = $pending_pan_photo_public_id;
+                }
+                if ($pending_signature_photo_url) {
+                    $update_query_parts[] = "pending_signature_photo = ?, pending_signature_photo_public_id = ?";
+                    $update_params[] = $pending_signature_photo_url;
+                    $update_params[] = $pending_signature_photo_public_id;
+                }
+            }
+
+            if (!empty($update_query_parts)) {
+                $sql = "UPDATE workers SET " . implode(', ', $update_query_parts) . " WHERE id = ?";
+                $update_params[] = $worker_id;
+                
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($update_params);
+                $success = "Update submitted! Changes are pending Admin Approval.";
+            } else {
+                 if ($password_changed) {
+                     $success = "Password updated successfully.";
+                 } else {
+                     $success = "No changes detected.";
+                 }
+            }
+            
+            $pdo->commit();
+
+            // Refresh Data
+            $stmt = $pdo->prepare("SELECT * FROM workers WHERE id = ?");
+            $stmt->execute([$worker_id]);
+            $worker = $stmt->fetch(); // Update view variable
+
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            $error = "Database Error: " . $e->getMessage();
         }
     }
 }
@@ -287,7 +388,7 @@ $worker = $stmt->fetch();
 <body class="bg-body">
     <?php 
     $path_prefix = '../';
-    include '../includes/navbar.php'; 
+    include '../includes/worker_navbar.php'; 
     ?>
 
     <div class="container py-5">
@@ -306,6 +407,8 @@ $worker = $stmt->fetch();
                         <?php endif; ?>
 
                         <form action="edit_profile.php" method="POST" enctype="multipart/form-data" id="workerProfileForm">
+                            <?php echo csrf_input(); ?>
+                            <?php renderHoneypot(); ?>
                             <div id="sizeWarning"></div>
                             <div class="text-center mb-4">
                                 <?php 
@@ -317,7 +420,7 @@ $worker = $stmt->fetch();
                                 <div class="mb-3">
                                     <h5 class="text-muted mb-1">Worker ID: <span class="text-warning fw-bold font-monospace"><?php echo htmlspecialchars($worker['worker_uid'] ?? 'Generating...'); ?></span></h5>
                                     <label for="profile_image" class="form-label">Change Profile Picture</label>
-                                    <?php if($worker['pending_profile_image']): ?>
+                                    <?php if(!empty($worker['pending_profile_image'])): ?>
                                         <div class="mb-2"><span class="badge bg-info"><i class="fas fa-clock"></i> New Photo Pending Approval</span></div>
                                     <?php endif; ?>
                                     <input type="file" class="form-control" id="profile_image" name="profile_image">
@@ -326,12 +429,12 @@ $worker = $stmt->fetch();
 
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label for="name" class="form-label">Full Name</label>
-                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($worker['name']); ?>" required>
+                                    <label for="name" class="form-label">Full Name <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <input type="text" class="form-control sensitive-field" id="name" name="name" value="<?php echo htmlspecialchars($worker['name']); ?>" required data-original="<?php echo htmlspecialchars($worker['name']); ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label for="phone" class="form-label">Phone Number</label>
-                                    <input type="tel" class="form-control" id="phone" name="phone" value="<?php echo htmlspecialchars($worker['phone']); ?>" pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits">
+                                    <label for="phone" class="form-label">Phone Number <small class="text-danger font-monospace">*Sensitive</small></label>
+                                    <input type="tel" class="form-control sensitive-field" id="phone" name="phone" value="<?php echo htmlspecialchars($worker['phone']); ?>" pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits" data-original="<?php echo htmlspecialchars($worker['phone']); ?>">
                                 </div>
                             </div>
 
@@ -357,7 +460,7 @@ $worker = $stmt->fetch();
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="hourly_rate" class="form-label">Hourly Rate (₹)</label>
-                                    <input type="number" class="form-control" id="hourly_rate" name="hourly_rate" value="<?php echo htmlspecialchars($worker['hourly_rate']); ?>" required min="0" step="0.01">
+                                    <input type="number" class="form-control" id="hourly_rate" name="hourly_rate" value="<?php echo htmlspecialchars($worker['hourly_rate']); ?>" required min="0.01" step="0.01">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="working_location" class="form-label">Preferred Working Area</label>
@@ -374,14 +477,14 @@ $worker = $stmt->fetch();
                                 <div class="col-md-6 mb-4">
                                     <div class="p-3 border rounded bg-light">
                                         <label class="form-label d-block fw-bold mb-3"><i class="fas fa-id-card me-2 text-primary"></i>Aadhar Card Photo</label>
-                                        <?php if($worker['aadhar_photo']): ?>
+                                        <?php if(!empty($worker['aadhar_photo'])): ?>
                                             <div class="mb-2">
                                                 <small class="text-muted d-block mb-1">Current Aadhar:</small>
                                                 <img src="<?php echo $worker['aadhar_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
                                             </div>
                                         <?php endif; ?>
                                         <input type="file" class="form-control" name="aadhar_photo" accept=".jpg,.jpeg,.png,.webp">
-                                        <?php if($worker['pending_aadhar_photo']): ?>
+                                        <?php if(!empty($worker['pending_aadhar_photo'])): ?>
                                             <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New Aadhar Pending Approval</div>
                                         <?php endif; ?>
                                         <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
@@ -390,14 +493,14 @@ $worker = $stmt->fetch();
                                 <div class="col-md-6 mb-4">
                                     <div class="p-3 border rounded bg-light">
                                         <label class="form-label d-block fw-bold mb-3"><i class="fas fa-id-card me-2 text-primary"></i>PAN Card Photo</label>
-                                        <?php if($worker['pan_photo']): ?>
+                                        <?php if(!empty($worker['pan_photo'])): ?>
                                             <div class="mb-2">
                                                 <small class="text-muted d-block mb-1">Current PAN:</small>
                                                 <img src="<?php echo $worker['pan_photo']; ?>" class="rounded shadow-sm" style="max-height: 100px;">
                                             </div>
                                         <?php endif; ?>
                                         <input type="file" class="form-control" name="pan_photo" accept=".jpg,.jpeg,.png,.webp">
-                                        <?php if($worker['pending_pan_photo']): ?>
+                                        <?php if(!empty($worker['pending_pan_photo'])): ?>
                                             <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New PAN Pending Approval</div>
                                         <?php endif; ?>
                                         <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
@@ -416,7 +519,7 @@ $worker = $stmt->fetch();
                                             </div>
                                         <?php endif; ?>
                                         <input type="file" class="form-control" name="signature_photo" accept=".jpg,.jpeg,.png,.webp">
-                                        <?php if($worker['pending_signature_photo']): ?>
+                                        <?php if(!empty($worker['pending_signature_photo'])): ?>
                                             <div class="mt-2 text-info small"><i class="fas fa-clock"></i> New Signature Pending Approval</div>
                                         <?php endif; ?>
                                         <small class="text-muted mt-2 d-block">Requires admin approval to update.</small>
@@ -454,8 +557,8 @@ $worker = $stmt->fetch();
                             </div>
 
                             <div class="mb-3">
-                                <label for="address" class="form-label">Address</label>
-                                <input type="text" class="form-control" id="address" name="address" value="<?php echo htmlspecialchars($worker['address']); ?>">
+                                <label for="address" class="form-label">Address <small class="text-danger font-monospace">*Sensitive</small></label>
+                                <input type="text" class="form-control sensitive-field" id="address" name="address" value="<?php echo htmlspecialchars($worker['address']); ?>" data-original="<?php echo htmlspecialchars($worker['address']); ?>">
                             </div>
 
                             <div class="mb-3">
@@ -466,7 +569,7 @@ $worker = $stmt->fetch();
                                     foreach ($existing_pins as $index => $pin): 
                                     ?>
                                     <div class="input-group mb-2 pin-code-group">
-                                        <input type="text" class="form-control pin-code-input" name="pin_codes[]" maxlength="6" pattern="\d{6}" placeholder="e.g. 110001" value="<?php echo htmlspecialchars(trim($pin)); ?>">
+                                        <input type="text" class="form-control pin-code-input" name="pin_codes[]" maxlength="6" pattern="\d*" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="e.g. 110001" value="<?php echo htmlspecialchars(trim($pin)); ?>">
                                         <?php if ($index === 0): ?>
                                         <button type="button" class="btn btn-outline-success btn-add-pin"><i class="fas fa-plus"></i></button>
                                         <?php else: ?>
@@ -481,8 +584,8 @@ $worker = $stmt->fetch();
                             </div>
 
                             <div id="otpSection" class="mb-3 border p-3 rounded bg-light" style="display: none;">
-                                <label for="profile_otp" class="form-label fw-bold"><i class="fas fa-shield-alt me-2 text-warning"></i>Identity Verification</label>
-                                <p class="small text-muted mb-2">Changing email or password requires verification. An OTP will be sent to your current email.</p>
+                                <label for="profile_otp" class="form-label fw-bold"><i class="fas fa-shield-alt me-2 text-warning"></i>Identity Verification Required</label>
+                                <p class="small text-muted mb-2">Changes to Contact Info (Email, Phone, Address), Password, or Essential Documents (ID Proofs) require OTP verification and Admin approval.</p>
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="profile_otp" name="profile_otp" placeholder="Enter 6-digit OTP">
                                     <button class="btn btn-warning" type="button" id="sendOtpBtn">Send OTP</button>
@@ -529,7 +632,7 @@ $worker = $stmt->fetch();
             // --- IMAGE COMPRESSION ---
             ImageCompressor.attach('workerProfileForm', 'Optimizing your profile photos...');
 
-            const sensitiveFields = document.querySelectorAll('.sensitive-field');
+            const sensitiveClasses = ['.sensitive-field', 'input[type="file"]'];
             const otpSection = document.getElementById('otpSection');
             const sendOtpBtn = document.getElementById('sendOtpBtn');
             const passInput = document.getElementById('new_password');
@@ -549,12 +652,19 @@ $worker = $stmt->fetch();
             // Detect changes
             function checkChanges() {
                 let changed = false;
-                sensitiveFields.forEach(field => {
-                    if (field.id === 'email') {
+                
+                // Check text inputs
+                document.querySelectorAll('.sensitive-field').forEach(field => {
+                    if (field.id === 'email' || field.id === 'phone' || field.id === 'address' || field.id === 'name') {
                         if (field.value !== field.dataset.original) changed = true;
                     } else if (field.id === 'new_password') {
                         if (field.value.length > 0) changed = true;
                     }
+                });
+
+                // Check file inputs
+                document.querySelectorAll('input[type="file"]').forEach(field => {
+                    if (field.files.length > 0) changed = true;
                 });
 
                 if (changed) {
@@ -566,7 +676,7 @@ $worker = $stmt->fetch();
                 }
             }
 
-            sensitiveFields.forEach(field => {
+            document.querySelectorAll('.sensitive-field, input[type="file"]').forEach(field => {
                 field.addEventListener('input', () => {
                     checkChanges();
                     if (field.id === 'new_password') {
@@ -599,6 +709,7 @@ $worker = $stmt->fetch();
                     
                     const formData = new FormData();
                     formData.append('send_profile_otp', '1');
+                    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
                     
                     fetch('edit_profile.php', {
                         method: 'POST',
@@ -643,7 +754,7 @@ $worker = $stmt->fetch();
                     const newGroup = document.createElement('div');
                     newGroup.className = 'input-group mb-2 pin-code-group';
                     newGroup.innerHTML = `
-                        <input type="text" class="form-control pin-code-input" name="pin_codes[]" maxlength="6" pattern="\\d{6}" placeholder="e.g. 110001">
+                        <input type="text" class="form-control pin-code-input" name="pin_codes[]" maxlength="6" pattern="\\d*" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="e.g. 110001">
                         <button type="button" class="btn btn-outline-danger btn-remove-pin"><i class="fas fa-minus"></i></button>
                     `;
                     container.appendChild(newGroup);

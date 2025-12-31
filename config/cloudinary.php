@@ -4,9 +4,9 @@ if (!defined('EXECUTION_ALLOWED')) {
 }
 
 // Cloudinary Configuration
-define('CLOUDINARY_CLOUD_NAME', 'dkrv5ryn3'); 
-define('CLOUDINARY_API_KEY', '585677224659683');
-define('CLOUDINARY_API_SECRET', 'Inl9Ge31k0gOKu57JMCA2UB_54s');
+define('CLOUDINARY_CLOUD_NAME', defined('CLOUDINARY_CLOUD_NAME') ? CLOUDINARY_CLOUD_NAME : 'dkrv5ryn3'); 
+define('CLOUDINARY_API_KEY', defined('CLOUDINARY_API_KEY') ? CLOUDINARY_API_KEY : '585677224659683');
+define('CLOUDINARY_API_SECRET', defined('CLOUDINARY_API_SECRET') ? CLOUDINARY_API_SECRET : 'Inl9Ge31k0gOKu57JMCA2UB_54s');
 
 // Folder structure
 define('CLD_FOLDER_USERS', 'users/profile/');

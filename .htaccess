@@ -2,13 +2,14 @@
 # Core Settings
 ############################################
 
-# Disable directory listing
-Options -Indexes
+# Disable directory listing (Commented out for InfinityFree compatibility)
+# Options -Indexes
 
 # Protect .htaccess itself
 <Files ".htaccess">
 Require all denied
 </Files>
+
 
 ############################################
 # Rewrite Engine
@@ -16,12 +17,16 @@ Require all denied
 <IfModule mod_rewrite.c>
 RewriteEngine On
 
+# Block common attack patterns in Query String
+RewriteCond %{QUERY_STRING} (\.\./|union|select|insert|drop|script|eval\(|base64_) [NC]
+RewriteRule .* - [F,L]
+
 # ------------------------------------------
 # Force HTTPS (Cloudflare + Proxy aware)
 # ------------------------------------------
-RewriteCond %{HTTPS} !=on
-RewriteCond %{HTTP:X-Forwarded-Proto} !https
-RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# RewriteCond %{HTTPS} !=on
+# RewriteCond %{HTTP:X-Forwarded-Proto} !https
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
 # ------------------------------------------
 # Force www (optional — remove if not needed)
@@ -30,10 +35,18 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 # RewriteRule ^ https://www.%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
 # ------------------------------------------
-# Block malicious bots
+# Block malicious bots & mirroring tools
 # ------------------------------------------
-RewriteCond %{HTTP_USER_AGENT} (Baiduspider|HTTrack|YandexBot|AhrefsBot|DotBot|MJ12bot|SemrushBot) [NC]
+RewriteCond %{HTTP_USER_AGENT} (Baiduspider|HTTrack|YandexBot|AhrefsBot|DotBot|MJ12bot|SemrushBot|wget|curl|libwww-perl|python|scrapy|kyptec|go-http-client) [NC]
 RewriteRule .* - [F,L]
+
+# ------------------------------------------
+# Hotlink Protection (Images & Assets)
+# ------------------------------------------
+RewriteCond %{HTTP_REFERER} !^$
+RewriteCond %{HTTP_REFERER} !^https?://(www\.)?labour-on-demand\.infinityfreeapp\.com [NC]
+RewriteCond %{HTTP_REFERER} !^https?://(www\.)?localhost [NC]
+RewriteRule \.(css|js|png|jpg|jpeg|webp|svg|pdf)$ - [F,NC]
 
 </IfModule>
 
@@ -53,12 +66,13 @@ Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
 
 </IfModule>
 
-############################################
-# Block Sensitive Files
-############################################
-<FilesMatch "\.(env|ini|log|sql|bak|lock|json|md)$">
+# Block Sensitive Files (Specific files and dangerous extensions)
+<FilesMatch "^\.|\.(sql|zip|bak|log|lock|env|htaccess|git|antigravity)$|^(config|credentials|secret|pass|db|composer|package)\.(php|json|ini|lock)$">
 Require all denied
 </FilesMatch>
+
+# Limit request size (10MB)
+LimitRequestBody 10485760
 
 ############################################
 # PHP Hardening
@@ -74,11 +88,6 @@ php_value post_max_size 150M
 php_value max_file_uploads 30
 php_value max_input_time 300
 php_value max_execution_time 300
-
-# Limit cloud upload endpoint to 350KB (max resolution 1700x1700px)
-<DirectoryMatch "/cloudinary|/upload_cloud">
-    LimitRequestBody 358400
-</DirectoryMatch>
 
 ############################################
 # Compression

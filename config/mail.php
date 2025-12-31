@@ -6,4 +6,7 @@ define('SMTP_PASSWORD', 'wnri dtwp qaak vcpj'); // Replace with your App Passwor
 define('SMTP_PORT', 587); // Usually 587 for TLS, 465 for SSL
 define('SMTP_FROM_EMAIL', 'no-reply@labourondemand.com');
 define('SMTP_FROM_NAME', 'Labour On Demand');
+
+// Security key for triggering cron via URL (e.g., on InfinityFree)
+define('CRON_KEY', 'lod_secure_cron_99x');
 ?>

@@ -72,12 +72,10 @@ if (isset($_SESSION['user_id'])) {
                     </div>
                 <?php else: ?>
                     <form id="feedbackForm" class="row g-2">
-                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                        <?php echo csrf_input(); ?>
                         <input type="hidden" name="sender_type" value="customer">
                         <!-- Honeypot Field -->
-                        <div style="display: none;">
-                            <input type="text" name="middle_name" tabindex="-1" autocomplete="off">
-                        </div>
+                        <?php renderHoneypot(); ?>
                         <div class="col-6">
                             <input type="text" name="name" class="form-control form-control-sm bg-body" placeholder="Your Name" value="<?php echo htmlspecialchars($pre_name); ?>" required>
                         </div>
@@ -101,7 +99,7 @@ if (isset($_SESSION['user_id'])) {
                             </small>
                         </div>
                         <div class="col-12">
-                             <div class="g-recaptcha" data-sitekey="6LfwHzgsAAAAAI0kyJ7g6V_S6uE0FFb4zDWpypmD"></div>
+                             <div class="g-recaptcha mb-3 d-flex justify-content-center" data-sitekey="6LfUczssAAAAAJAyN5ozYXwMRzPfmfnzex9NRLdu"></div>
                         </div>
                         <script src="https://www.google.com/recaptcha/api.js" async defer></script>
                     </form>
@@ -155,3 +153,5 @@ document.getElementById('feedbackForm').addEventListener('submit', function(e) {
 
 <?php include __DIR__ . '/lightbox.php'; ?>
 <?php include __DIR__ . '/toast.php'; ?>
+<script src="<?php echo $base_path; ?>assets/js/animations.js"></script>
+

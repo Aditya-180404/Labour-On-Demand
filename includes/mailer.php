@@ -4,11 +4,20 @@ if (!defined('EXECUTION_ALLOWED')) exit('Direct access not allowed.');
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-require __DIR__ . '/../vendor/autoload.php'; // Adjust path if needed
+$autoload_path = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($autoload_path)) {
+    require $autoload_path;
+} else {
+    error_log("Mailer Error: vendor/autoload.php not found. Emails will not send.");
+}
 require_once __DIR__ . '/../config/mail.php';
 
-// Generic Send Email Function
-function sendEmail($to_email, $to_name, $subject, $body, $alt_body = '') {
+// 1. Actual Sender (Used by Worker) - Renamed from sendEmail
+function sendEmailNow($to_email, $to_name, $subject, $body, $alt_body = '') {
+    if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+        return ['status' => false, 'message' => 'Mailer dependencies not installed (vendor missing).'];
+    }
+    
     $mail = new PHPMailer(true);
 
     try {
@@ -38,6 +47,73 @@ function sendEmail($to_email, $to_name, $subject, $body, $alt_body = '') {
     }
 }
 
+// 2. Queue Pusher (Used by App) - New "sendEmail"
+function sendEmail($to_email, $to_name, $subject, $body, $alt_body = '', $send_now = false) {
+    global $pdo;
+
+    // Emergency override or direct send request
+    if ($send_now) {
+        return sendEmailNow($to_email, $to_name, $subject, $body, $alt_body);
+    }
+
+    // Prepare Payload
+    $payload = json_encode([
+        'to_email' => $to_email,
+        'to_name' => $to_name,
+        'subject' => $subject,
+        'body' => $body,
+        'alt_body' => $alt_body
+    ]);
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO jobs (type, payload, status, created_at) VALUES ('email', ?, 'pending', NOW())");
+        $stmt->execute([$payload]);
+        
+        // SAFETY NET: Trigger the worker immediately (Fire-and-Forget)
+        triggerAsyncWorker();
+        
+        return ['status' => true, 'message' => 'Email queued successfully.'];
+    } catch (PDOException $e) {
+        error_log("Queue Failed: " . $e->getMessage());
+        return sendEmailNow($to_email, $to_name, $subject, $body, $alt_body);
+    }
+}
+
+// 3. Safety Net: Poke the worker script via HTTP (Non-Blocking)
+function triggerAsyncWorker() {
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $uri = rtrim(dirname($_SERVER['PHP_SELF']), '/\\');
+    
+    // Adjust path based on common directory structures
+    $path = "";
+    if (strpos($uri, 'admin') !== false || strpos($uri, 'customer') !== false || strpos($uri, 'worker') !== false) {
+        $path = "/../cron/process_jobs.php";
+    } else {
+        $path = "/cron/process_jobs.php";
+    }
+
+    $is_https = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') || 
+                (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
+    $scheme = $is_https ? 'ssl://' : '';
+    $port = $is_https ? 443 : 80;
+    
+    // Attempt to open socket with very short timeout
+    $fp = @fsockopen($scheme . $host, $port, $errno, $errstr, 0.5);
+    
+    if ($fp) {
+        // Build the full request path with security key
+        $full_path = $uri . $path . "?key=" . CRON_KEY;
+        $full_path = str_replace(['//', '\\'], '/', $full_path);
+        
+        $out = "GET " . $full_path . " HTTP/1.1\r\n";
+        $out .= "Host: $host\r\n";
+        $out .= "Connection: Close\r\n\r\n";
+        fwrite($fp, $out);
+        fclose($fp);
+    }
+}
+
 function sendOTPEmail($to_email, $otp, $name = 'User', $uid = null) {
     $subject = 'Your OTP Code - Labour On Demand';
     $uid_html = $uid ? "<p style='color: #666; font-size: 0.9em;'>Your Unique ID: <strong style='color: #333;'>$uid</strong></p>" : "";
@@ -55,6 +131,7 @@ function sendOTPEmail($to_email, $otp, $name = 'User', $uid = null) {
     ";
     $altBody = "Hello $name, " . ($uid ? "Your Unique ID is: $uid. " : "") . "Your OTP code is: $otp. Regards, Team Labour On Demand";
 
+    // OTPs are urgent, so we use sendEmail which triggers the worker immediately
     return sendEmail($to_email, $name, $subject, $body, $altBody);
 }
 

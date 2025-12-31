@@ -1,6 +1,6 @@
 <?php
 $path_prefix = '../';
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/mailer.php';
 require_once '../includes/cloudinary_helper.php';
@@ -12,7 +12,31 @@ if (!isset($_SESSION['admin_logged_in'])) {
     exit;
 }
 
+// Global CSRF & Bot Protection for all Admin Actions
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // 1. Bot Detection
+    if (isBotDetected()) {
+        die("Security Error: Bot detected. Action blocked.");
+    }
+    // 2. CSRF Validation
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        die("Security Error: Invalid CSRF Token. Please refresh the page and try again.");
+    }
+}
+
+// Handle Security Log Actions
+if (isset($_POST['clear_security_logs'])) {
+    $pdo->query("DELETE FROM security_incidents");
+    $_SESSION['success_msg'] = "Security logs cleared successfully.";
+    header("Location: dashboard.php#security-tab");
+    exit;
+}
+
 $success_msg = $error_msg = "";
+if (isset($_SESSION['success_msg'])) {
+    $success_msg = $_SESSION['success_msg'];
+    unset($_SESSION['success_msg']);
+}
 
 // Handle Worker Approval/Rejection (New Registration)
 if (isset($_POST['action']) && isset($_POST['worker_id'])) {
@@ -40,7 +64,7 @@ if (isset($_POST['action']) && isset($_POST['worker_id'])) {
                         <p>Hello <strong>{$worker['name']}</strong>,</p>
                         <p>Congratulations! Your worker profile has been approved by the admin.</p>
                         <p>You can now login to your account and start accepting bookings.</p>
-                        <a href='" . getBaseUrl() . "worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
+                        <a href='../worker/login.php' style='display: inline-block; padding: 10px 20px; color: white; background-color: #28a745; text-decoration: none; border-radius: 5px;'>Login Now</a>
                         <br><br>
                         <p>Regards,<br>Team Labour On Demand</p>
                     </div>";
@@ -194,6 +218,10 @@ if (!empty($history_q)) {
 }
 $doc_history = $history_stmt->fetchAll();
 
+// Fetch Security Incidents
+$incidents_stmt = $pdo->query("SELECT * FROM security_incidents ORDER BY created_at DESC LIMIT 50");
+$security_incidents = $incidents_stmt->fetchAll();
+
 // Fetch Feedbacks with Search (including UID check)
 if (!empty($feedback_q)) {
     $feedbacks_stmt = $pdo->prepare("
@@ -237,16 +265,16 @@ function renderFeedbackTable($feedbacks, $showRole = true, $context = 'default')
                 <?php if($showRole): ?>
                 <td>
                     <?php 
-                        $role_color = match($fb['sender_role']) {
-                            'worker' => 'warning text-dark',
-                            'user' => 'primary',
-                            default => 'secondary'
-                        };
-                        $role_icon = match($fb['sender_role']) {
-                            'worker' => 'hard-hat',
-                            'user' => 'user',
-                            default => 'ghost'
-                        };
+                        $role_color = 'secondary';
+                        $role_icon = 'ghost';
+                        
+                        if ($fb['sender_role'] === 'worker') {
+                            $role_color = 'warning text-dark';
+                            $role_icon = 'hard-hat';
+                        } elseif ($fb['sender_role'] === 'user') {
+                            $role_color = 'primary';
+                            $role_icon = 'user';
+                        }
                     ?>
                     <span class="badge bg-<?php echo $role_color; ?> rounded-pill">
                         <i class="fas fa-<?php echo $role_icon; ?> me-1"></i><?php echo ucfirst($fb['sender_role']); ?>
@@ -291,6 +319,7 @@ function renderFeedbackTable($feedbacks, $showRole = true, $context = 'default')
                                         </div>
                                         <form method="POST">
                                             <div class="modal-body">
+                                                <?php echo csrf_input(); ?>
                                                 <input type="hidden" name="feedback_id" value="<?php echo $fb['id']; ?>">
                                                 <input type="hidden" name="reply_email" value="<?php echo htmlspecialchars($fb['email']); ?>">
                                                 <input type="hidden" name="reply_name" value="<?php echo htmlspecialchars($fb['name']); ?>">
@@ -506,6 +535,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                 <a href="#" data-bs-toggle="tab" data-bs-target="#bookings-tab"><i class="fas fa-calendar-alt me-2"></i>All Bookings</a>
                 <a href="#" data-bs-toggle="tab" data-bs-target="#feedback-tab"><i class="fas fa-comments me-2"></i>Feedback</a>
                 <a href="#" data-bs-toggle="tab" data-bs-target="#history-tab"><i class="fas fa-history me-2"></i>Document History</a>
+                <a href="#" data-bs-toggle="tab" data-bs-target="#security-tab"><i class="fas fa-shield-alt me-2"></i>Security Activity</a>
                 <hr class="text-white-50 mx-3 my-2">
             </div>
 
@@ -591,6 +621,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                             <td>₹<?php echo $worker['hourly_rate']; ?></td>
                                             <td>
                                                 <form method="POST" class="d-flex gap-2 align-items-center">
+                                                            <?php echo csrf_input(); ?>
                                                     <input type="hidden" name="worker_id" value="<?php echo $worker['id']; ?>">
                                                     <a href="view_worker.php?id=<?php echo $worker['id']; ?>" class="btn btn-outline-primary btn-sm rounded-pill" title="View Profile">
                                                         <i class="fas fa-eye"></i>
@@ -623,10 +654,21 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bookings-tab" type="button">All Bookings</button>
                 </li>
                 <li class="nav-item">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#feedback-tab" type="button">Feedback <?php if(count(array_filter($feedbacks, fn($f) => $f['status'] == 'pending')) > 0): ?><span class="badge bg-warning text-dark rounded-pill"><?php echo count(array_filter($feedbacks, fn($f) => $f['status'] == 'pending')); ?></span><?php endif; ?></button>
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#feedback-tab" type="button">Feedback <?php if(count(array_filter($feedbacks, function($f) { return $f['status'] == 'pending'; })) > 0): ?><span class="badge bg-warning text-dark rounded-pill"><?php echo count(array_filter($feedbacks, function($f) { return $f['status'] == 'pending'; })); ?></span><?php endif; ?></button>
                 </li>
                 <li class="nav-item">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-tab" type="button">Document History</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#security-tab" type="button">
+                        Security Activity 
+                        <?php 
+                        $critical_count = count(array_filter($security_incidents, function($i) { return in_array($i['severity'], ['high', 'critical']); }));
+                        if($critical_count > 0): 
+                        ?>
+                            <span class="badge bg-danger rounded-pill"><?php echo $critical_count; ?></span>
+                        <?php endif; ?>
+                    </button>
                 </li>
             </ul>
 
@@ -696,6 +738,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                                     </td>
                                                     <td style="width: 200px;">
                                                         <form method="POST" class="d-flex gap-2">
+                                                                    <?php echo csrf_input(); ?>
                                                             <input type="hidden" name="worker_id" value="<?php echo $du['id']; ?>">
                                                             <button type="submit" name="doc_action" value="approve" class="btn btn-success btn-sm px-3 rounded-pill">Approve</button>
                                                             <button type="submit" name="doc_action" value="reject" class="btn btn-outline-danger btn-sm px-3 rounded-pill">Reject</button>
@@ -1025,10 +1068,10 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                             <button class="nav-link active py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-all" type="button">All (<?php echo count($feedbacks); ?>)</button>
                                         </li>
                                         <li class="nav-item ms-2">
-                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-users" type="button">Guests (<?php echo count(array_filter($feedbacks, fn($f) => in_array($f['sender_role'], ['user', 'guest']))); ?>)</button>
+                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-users" type="button">Guests (<?php echo count(array_filter($feedbacks, function($f) { return in_array($f['sender_role'], ['user', 'guest']); })); ?>)</button>
                                         </li>
                                         <li class="nav-item ms-2">
-                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-workers" type="button">Workers (<?php echo count(array_filter($feedbacks, fn($f) => $f['sender_role'] == 'worker')); ?>)</button>
+                                            <button class="nav-link py-1 px-3" data-bs-toggle="tab" data-bs-target="#fb-workers" type="button">Workers (<?php echo count(array_filter($feedbacks, function($f) { return $f['sender_role'] == 'worker'; })); ?>)</button>
                                         </li>
                                     </ul>
                                 </div>
@@ -1073,7 +1116,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <?php renderFeedbackTable(array_filter($feedbacks, fn($f) => in_array($f['sender_role'], ['user', 'guest'])), true); ?>
+                                                <?php renderFeedbackTable(array_filter($feedbacks, function($f) { return in_array($f['sender_role'], ['user', 'guest']); }), true); ?>
                                             </tbody>
                                         </table>
                                     </div>
@@ -1093,7 +1136,7 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <?php renderFeedbackTable(array_filter($feedbacks, fn($f) => $f['sender_role'] == 'worker'), false); ?>
+                                                <?php renderFeedbackTable(array_filter($feedbacks, function($f) { return $f['sender_role'] == 'worker'; }), false); ?>
                                             </tbody>
                                         </table>
                                     </div>
@@ -1190,6 +1233,66 @@ if (isset($_POST['send_feedback_reply']) && isset($_POST['feedback_id'])) {
                         </div>
                     </div>
                 </div> <!-- End Document History Tab -->
+                <!-- Security Activity Tab -->
+                <div class="tab-pane fade" id="security-tab">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                            <h5 class="mb-0 text-danger fw-bold"><i class="fas fa-shield-alt me-2"></i>Recent Security Incidents</h5>
+                            <form method="POST" onsubmit="return confirm('Are you sure you want to clear all security logs?');">
+                                <button type="submit" name="clear_security_logs" class="btn btn-outline-danger btn-sm rounded-pill">
+                                    <i class="fas fa-trash-alt me-1"></i> Clear Logs
+                                </button>
+                            </form>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>IP Address</th>
+                                            <th>Incident</th>
+                                            <th>Severity</th>
+                                            <th>Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if(count($security_incidents) > 0): ?>
+                                            <?php foreach($security_incidents as $inc): ?>
+                                                <?php 
+                                                    $sev_class = 'bg-secondary';
+                                                    if($inc['severity'] == 'high') $sev_class = 'bg-danger';
+                                                    elseif($inc['severity'] == 'medium') $sev_class = 'bg-warning text-dark';
+                                                    elseif($inc['severity'] == 'critical') $sev_class = 'bg-dark';
+                                                ?>
+                                                <tr>
+                                                    <td>
+                                                        <small class="text-muted d-block"><?php echo date('M d, Y', strtotime($inc['created_at'])); ?></small>
+                                                        <small class="text-muted"><?php echo date('h:i A', strtotime($inc['created_at'])); ?></small>
+                                                    </td>
+                                                    <td class="font-monospace"><?php echo htmlspecialchars($inc['ip_address']); ?></td>
+                                                    <td><span class="badge bg-outline-dark border text-dark"><?php echo strtoupper($inc['incident_type']); ?></span></td>
+                                                    <td><span class="badge <?php echo $sev_class; ?>"><?php echo strtoupper($inc['severity']); ?></span></td>
+                                                    <td class="small text-muted">
+                                                        <?php echo htmlspecialchars($inc['details']); ?>
+                                                        <br><small class="text-truncate d-block" style="max-width: 200px;"><?php echo htmlspecialchars($inc['user_agent']); ?></small>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center py-5">
+                                                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                                                    <p class="text-muted">No security incidents detected recently.</p>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div> <!-- End Security Activity Tab -->
             </div> <!-- End Tab Content -->
         </div> <!-- End container-fluid -->
     </div> <!-- End main-content -->

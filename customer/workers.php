@@ -1,5 +1,5 @@
 <?php
-require_once '../config/security.php';
+require_once '../includes/security.php';
 require_once '../config/db.php';
 require_once '../includes/cloudinary_helper.php';
 $cld = CloudinaryHelper::getInstance();
@@ -16,6 +16,13 @@ $booking_error = "";
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     if (!isset($_SESSION['user_id'])) {
         header("Location: login.php");
+        exit;
+    }
+
+    // CSRF Protection
+    if (!isset($_POST['csrf_token']) || !verifyCSRF($_POST['csrf_token'])) {
+        $_SESSION['toast_error'] = "Security validation failed. Please try again.";
+        header("Location: workers.php");
         exit;
     }
 
@@ -52,69 +59,91 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_worker'])) {
     }
 }
 
-// ... (rest of the code)
+// Build Query Logic
+$base_filters = "w.status = 'approved'";
+$base_params = [];
 
-// Build Query - Filter workers by user's PIN code
-$query = "SELECT w.*, c.name as category_name, c.icon as category_icon, 
-          AVG(r.rating) as avg_rating, COUNT(r.id) as review_count
-          FROM workers w 
-          LEFT JOIN categories c ON w.service_category_id = c.id 
-          LEFT JOIN reviews r ON w.id = r.worker_id
-          WHERE w.status = 'approved'";
+if (isset($_GET['search']) && !empty($_GET['search'])) {
+    $search = "%" . $_GET['search'] . "%";
+    $base_filters .= " AND (w.name LIKE ? OR c.name LIKE ?)";
+    $base_params[] = $search;
+    $base_params[] = $search;
+}
 
-$params = [];
+if (isset($_GET['category']) && !empty($_GET['category'])) {
+    $base_filters .= " AND w.service_category_id = ?";
+    $base_params[] = $_GET['category'];
+}
 
-// Get user's PIN code if logged in
+// Get user's PIN code
 $user_pin = null;
 if (isset($_SESSION['user_id'])) {
     $user_stmt = $pdo->prepare("SELECT pin_code FROM users WHERE id = ?");
     $user_stmt->execute([$_SESSION['user_id']]);
     $user_data = $user_stmt->fetch();
-    if ($user_data && !empty($user_data['pin_code'])) {
-        $user_pin = $user_data['pin_code'];
+    $user_pin = ($user_data && !empty($user_data['pin_code'])) ? intval($user_data['pin_code']) : null;
+}
+
+$location_status = "global"; // default
+$final_filters = $base_filters;
+$final_params = $base_params;
+
+if ($user_pin) {
+    // 1. Try Exact Match
+    $exact_params = array_merge([$user_pin], $base_params);
+    $exact_stmt = $pdo->prepare("SELECT COUNT(*) FROM workers w LEFT JOIN categories c ON w.service_category_id = c.id WHERE $base_filters AND FIND_IN_SET(?, w.pin_code)");
+    $exact_stmt->execute($exact_params);
+    
+    if ($exact_stmt->fetchColumn() > 0) {
+        $final_filters .= " AND FIND_IN_SET(?, w.pin_code)";
+        $final_params = array_merge($base_params, [$user_pin]);
+        $location_status = "exact";
+    } else {
+        // 2. Try nearby (+/- 5)
+        $min_pin = $user_pin - 5;
+        $max_pin = $user_pin + 5;
+        
+        // Since pin_code in workers is comma-separated TEXT, we need a complex check or simplify.
+        // For robustness, we check if ANY of the comma-separated PINs fall in range.
+        // Simplified SQL approach for TEXT comma-separated range check:
+        $range_stmt = $pdo->prepare("SELECT COUNT(*) FROM workers w LEFT JOIN categories c ON w.service_category_id = c.id WHERE $base_filters AND EXISTS (
+            SELECT 1 FROM (SELECT ? as p UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ?) as ranges
+            WHERE FIND_IN_SET(ranges.p, w.pin_code)
+        )");
+        
+        $range_vals = range($user_pin - 5, $user_pin + 5);
+        $range_stmt->execute(array_merge($range_vals, $base_params));
+        
+        if ($range_stmt->fetchColumn() > 0) {
+            $final_filters .= " AND EXISTS (
+                SELECT 1 FROM (SELECT ? as p UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ? UNION SELECT ?) as ranges
+                WHERE FIND_IN_SET(ranges.p, w.pin_code)
+            )";
+            $final_params = array_merge($base_params, $range_vals);
+            $location_status = "nearby";
+        } else {
+            $location_status = "none_nearby";
+        }
     }
 }
 
-// Filter by user's PIN code if logged in
-if ($user_pin) {
-    $query .= " AND FIND_IN_SET(?, w.pin_code)";
-    $params[] = $user_pin;
-}
-
-if (isset($_GET['search']) && !empty($_GET['search'])) {
-    $search = "%" . $_GET['search'] . "%";
-    $query .= " AND (w.name LIKE ? OR c.name LIKE ?)";
-    $params[] = $search;
-    $params[] = $search;
-}
-
-if (isset($_GET['category']) && !empty($_GET['category'])) {
-    $query .= " AND w.service_category_id = ?";
-    $params[] = $_GET['category'];
-}
-// Grouping
-$query .= " GROUP BY w.id";
+// Final Query assembly
+$query = "SELECT w.*, c.name as category_name, c.icon as category_icon 
+          FROM workers w 
+          LEFT JOIN categories c ON w.service_category_id = c.id 
+          WHERE $final_filters";
 
 // Handle Sorting
 $sort = isset($_GET['sort']) ? $_GET['sort'] : 'newest';
 switch ($sort) {
-    case 'price_low':
-        $query .= " ORDER BY w.hourly_rate ASC";
-        break;
-    case 'price_high':
-        $query .= " ORDER BY w.hourly_rate DESC";
-        break;
-    case 'rating':
-        $query .= " ORDER BY avg_rating DESC, review_count DESC";
-        break;
-    case 'newest':
-    default:
-        $query .= " ORDER BY w.created_at DESC";
-        break;
+    case 'price_low': $query .= " ORDER BY w.hourly_rate ASC"; break;
+    case 'price_high': $query .= " ORDER BY w.hourly_rate DESC"; break;
+    case 'rating': $query .= " ORDER BY w.avg_rating DESC, w.total_reviews DESC"; break; 
+    case 'newest': default: $query .= " ORDER BY w.created_at DESC"; break;
 }
 
 $stmt = $pdo->prepare($query);
-$stmt->execute($params);
+$stmt->execute($final_params);
 $workers = $stmt->fetchAll();
 
 // Fetch Categories for Filter
@@ -151,7 +180,7 @@ $categories = $cat_stmt->fetchAll();
 
         <div class="row">
             <!-- Sidebar / Filter -->
-            <div class="col-lg-3 mb-4">
+            <div class="col-lg-3 mb-4 reveal-fade">
                 <div class="filter-section shadow-sm">
                     <h5 class="mb-3">Filter Workers</h5>
                     <form action="workers.php" method="GET">
@@ -186,13 +215,27 @@ $categories = $cat_stmt->fetchAll();
             </div>
 
             <!-- Worker List -->
-            <div class="col-lg-9">
-                <h4 class="mb-4">Available Workers (<?php echo count($workers); ?>)</h4>
-                
+            <div class="col-lg-9 reveal-fade" data-delay="100">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4 class="mb-0">Available Workers (<?php echo count($workers); ?>)</h4>
+                    <?php if($location_status === 'exact'): ?>
+                        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3">
+                            <i class="fas fa-map-marker-alt me-1"></i> Exact Matches in <?php echo $user_pin; ?>
+                        </span>
+                    <?php elseif($location_status === 'nearby'): ?>
+                        <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-3">
+                            <i class="fas fa-map-marked-alt me-1"></i> Showing Nearby Area (+/- 5 range)
+                        </span>
+                    <?php elseif($location_status === 'none_nearby'): ?>
+                        <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-3">
+                            <i class="fas fa-globe-asia me-1"></i> No local workers found. Showing all.
+                        </span>
+                    <?php endif; ?>
+                </div>
                 <?php if(count($workers) > 0): ?>
                     <div class="row g-4">
                         <?php foreach($workers as $worker): ?>
-                            <div class="col-md-6 col-xl-4">
+                            <div class="col-md-6 col-xl-4 reveal-fade" data-delay="200">
                                         <div class="card worker-card h-100 shadow-sm rounded-4">
                                         <div class="card-body text-center">
                                             <div class="mb-3">
@@ -224,6 +267,8 @@ $categories = $cat_stmt->fetchAll();
                                             <div class="mb-2 text-warning small">
                                                 <?php 
                                                 $avg = round($worker['avg_rating'], 1);
+                                                $rev_count = $worker['total_reviews'];
+                                                
                                                 $stars = floor($avg);
                                                 for($i=1; $i<=5; $i++) {
                                                     if($i <= $stars) echo '<i class="fas fa-star"></i>';
@@ -231,8 +276,8 @@ $categories = $cat_stmt->fetchAll();
                                                     else echo '<i class="far fa-star"></i>';
                                                 }
                                                 ?>
-                                                <span class="fw-bold text-dark ms-1"><?php echo $avg > 0 ? $avg : ''; ?></span>
-                                                <span class="text-muted ms-1 small">(<?php echo $worker['review_count']; ?>)</span>
+                                                <span class="fw-bold text-dark ms-1"><?php echo $avg > 0 ? $avg : '0'; ?></span>
+                                                <span class="text-muted ms-1 small">(<?php echo $rev_count; ?>)</span>
                                             </div>
 
                                             <p class="text-primary fw-bold mb-2">₹<?php echo number_format($worker['hourly_rate'], 0); ?> / hr</p>
@@ -255,6 +300,7 @@ $categories = $cat_stmt->fetchAll();
                                         </div>
                                         <form method="POST">
                                             <div class="modal-body">
+                                                <?php echo csrf_input(); ?>
                                                 <input type="hidden" name="worker_id" value="<?php echo $worker['id']; ?>">
                                                 <div class="mb-3">
                                                     <label class="form-label">Select Date</label>
